@@ -128,13 +128,7 @@ pub(crate) use forward_shift_op;
 
 macro_rules! define_exgcd_inverse {
     ($is_prime:literal) => {
-        /// Compute multiplicative inverse.
-        ///
-        /// Returns `None` if `x` is not coprime with `2^k - 1`.
-        ///
-        /// The current implementation uses the iterative binary extended Euclidean algorithm and
-        /// works in `O(k)`.
-        pub fn inverse(self) -> Option<Self> {
+        fn inverse(self) -> Option<Self> {
             if self.value == 0 {
                 return None;
             }
@@ -194,15 +188,19 @@ macro_rules! define_exgcd_inverse {
 pub(crate) use define_exgcd_inverse;
 
 macro_rules! define_type_basics {
-    ($ty:ident as $native:ident, shr = $shr:tt) => {
+    (#[$meta:meta] $ty:ident as $native:ident, shr = $shr:tt) => {
+        #[$meta]
+        ///
+        /// This type does not have any inherent methods. Use the [`Mod`] trait to access its
+        /// features.
+        ///
+        /// See [module-level documentation](self) for more information.
+        #[derive(Clone, Copy, Default)]
+        pub struct $ty {
+            value: $native,
+        }
+
         impl $ty {
-            /// A constant `0` value.
-            pub const ZERO: Self = Self { value: 0 };
-
-            /// A constant `1` value.
-            pub const ONE: Self = Self { value: 1 };
-
-            // Shared among fast and prime moduli.
             fn pow_internal(self, mut n: u64) -> Self {
                 let mut res = Self::ONE;
                 let mut tmp = self;
@@ -470,7 +468,7 @@ macro_rules! test_ty {
                 let sx = to_signed(x);
                 assert_eq!(x.is_zero(), sx == 0);
                 assert_eq!(x.is::<0>(), sx == 0);
-                assert_eq!(x.is::<{ $ty::MODULUS.wrapping_sub(1) }>(), sx == -1);
+                assert_eq!(x.is::<{ $ty::MODULUS.wrapping_sub(1) as u64 }>(), sx == -1);
                 assert_eq!(x.is::<5>(), sx == 5);
             }
 

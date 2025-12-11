@@ -6,6 +6,7 @@
 //! fits in `u32`), you can help the compiler optimize reduction with [`assert`] or
 //! [`assert_unchecked`](core::hint::assert_unchecked).
 
+use super::Mod;
 use core::ops::{Add, Mul, Neg, Shl, Shr, Sub};
 
 macro_rules! define_type {
@@ -15,123 +16,17 @@ macro_rules! define_type {
         test in $test_mod:ident,
         k = $k:literal
     ) => {
-        #[$meta]
-        ///
-        /// See [module-level documentation](self) for more information.
-        #[derive(Clone, Copy, Default)]
-        pub struct $ty {
-            /// Stores the remainder exactly.
-            value: $native,
+        // The `value` field stores the remainder.
+        crate::macros::define_type_basics! {
+            #[$meta]
+            $ty as $native,
+            shr = true
         }
-
-        crate::macros::define_type_basics!($ty as $native, shr = true);
 
         impl $ty {
             const MODULUS: $native = (1 << $k) - 1;
             #[allow(unused, reason = "used by tests")]
             const CARMICHAEL: u64 = Self::MODULUS as u64 - 1;
-
-            /// Create a value corresponding to `x mod (2^k - 1)`.
-            #[inline]
-            pub const fn new(x: $native) -> Self {
-                Self {
-                    value: x % Self::MODULUS,
-                }
-            }
-
-            /// Create a value corresponding to `x`, assuming `x < 2^k - 1`.
-            ///
-            /// This function is faster than [`new`](Self::new), but assumes `x` does not need to be
-            /// reduced modulo `2^k - 1`. It does not perform any checks to validate this is the
-            /// case.
-            ///
-            /// # Safety
-            ///
-            /// This function is only valid to call if `x < 2^k - 1`.
-            #[inline]
-            pub unsafe fn from_remainder_unchecked(x: $native) -> Self {
-                debug_assert!(x < Self::MODULUS);
-                Self { value: x }
-            }
-
-            /// Get the normalized residue `x mod (2^k - 1)`.
-            #[inline]
-            pub const fn remainder(self) -> $native {
-                self.value
-            }
-
-            /// Get the internal optimized representation of the number.
-            ///
-            /// For prime moduli, this is the same thing as [`remainder`](Self::remainder). This is
-            /// present for compatibility with fast moduli, where `to_raw` is faster.
-            #[inline]
-            pub const fn to_raw(self) -> $native {
-                self.value
-            }
-
-            /// Compare for equality with a constant.
-            ///
-            /// This is the same thing as `x == ModK::new(C)`, but asserts in compile-time that `C`
-            /// is a valid remainder. This function is mostly present for compatibility with fast
-            /// moduli, for which `is` is faster than `==`.
-            #[inline]
-            pub const fn is<const C: $native>(self) -> bool {
-                const {
-                    assert!(C < Self::MODULUS, "constant out of bounds");
-                }
-                self.value == C
-            }
-
-            /// Compare for equality with zero.
-            ///
-            /// This is equialvent to `x.is::<0>()` or `x == ModK::ZERO`.
-            #[inline]
-            pub const fn is_zero(self) -> bool {
-                self.value == 0
-            }
-
-            /// Compute `x^n mod (2^k - 1)`.
-            ///
-            /// The current implementation uses iterative binary exponentiation, combining it with
-            /// [Euler's theorem][1] to reduce exponents. It works in `O(log n)`.
-            ///
-            /// [1]: https://en.wikipedia.org/wiki/Euler%27s_theorem
-            pub fn pow(self, n: u64) -> Self {
-                if n == 0 {
-                    return Self::ONE;
-                }
-                // For prime moduli `p` and `x != 0`, FLT enables taking `n` modulo `p - 1`. We
-                // instead use the adjustment
-                //     n' = n - n // (p + 1) * (p - 1)
-                // ...which is only slightly worse, but can be computed much faster since `p + 1`
-                // is a power of two.
-                //
-                // It also turns out that `n > 0` implies `n' > 0`, since in
-                //     n - n // (p + 1) * (p - 1) >= n - n // (p - 1) * (p - 1) >= 0
-                // ...both equalities cannot hold at the same time: the second equality requires
-                // `n = (p - 1) * k`, but for such `n`
-                //     n // (p + 1) <= n / (p + 1) < k = n // (p - 1)
-                // ...so the first equality can't hold. This allows the formula to be used even for
-                // `x = 0`.
-                let p = Self::MODULUS as u64;
-                let n = n - n / (p + 1) * (p - 1);
-                unsafe {
-                    // SAFETY: proven above.
-                    core::hint::assert_unchecked(n != 0);
-                }
-                self.pow_internal(n)
-            }
-
-            /// Check if the value is invertible, i.e. if `x != 0 (mod (2^k - 1))`.
-            ///
-            /// This method is provided for compatibility with fast moduli, for which the check is
-            /// more complicated.
-            #[inline]
-            pub fn is_invertible(self) -> bool {
-                self.value != 0
-            }
-
-            crate::macros::define_exgcd_inverse!(true);
 
             #[inline]
             fn shift_internal(self, n: u32, left: bool) -> Self {
@@ -181,6 +76,81 @@ macro_rules! define_type {
                 // because the input can't be all ones.
                 unsafe { Self::from_remainder_unchecked(x) }
             }
+        }
+
+        impl Mod for $ty {
+            type Native = $native;
+            const ZERO: Self = Self { value: 0 };
+            const ONE: Self = Self { value: 1 };
+
+            #[inline]
+            fn new(x: $native) -> Self {
+                Self {
+                    value: x % Self::MODULUS,
+                }
+            }
+
+            #[inline]
+            unsafe fn from_remainder_unchecked(x: $native) -> Self {
+                debug_assert!(x < Self::MODULUS);
+                Self { value: x }
+            }
+
+            #[inline]
+            fn remainder(self) -> $native {
+                self.value
+            }
+
+            #[inline]
+            fn to_raw(self) -> $native {
+                self.value
+            }
+
+            #[inline]
+            fn is<const C: u64>(self) -> bool {
+                const {
+                    assert!(C < Self::MODULUS as u64, "constant out of bounds");
+                }
+                self.value == C as $native
+            }
+
+            #[inline]
+            fn is_zero(&self) -> bool {
+                self.value == 0
+            }
+
+            fn pow(self, n: u64) -> Self {
+                if n == 0 {
+                    return Self::ONE;
+                }
+                // For prime moduli `p` and `x != 0`, FLT enables taking `n` modulo `p - 1`. We
+                // instead use the adjustment
+                //     n' = n - n // (p + 1) * (p - 1)
+                // ...which is only slightly worse, but can be computed much faster since `p + 1`
+                // is a power of two.
+                //
+                // It also turns out that `n > 0` implies `n' > 0`, since in
+                //     n - n // (p + 1) * (p - 1) >= n - n // (p - 1) * (p - 1) >= 0
+                // ...both equalities cannot hold at the same time: the second equality requires
+                // `n = (p - 1) * k`, but for such `n`
+                //     n // (p + 1) <= n / (p + 1) < k = n // (p - 1)
+                // ...so the first equality can't hold. This allows the formula to be used even for
+                // `x = 0`.
+                let p = Self::MODULUS as u64;
+                let n = n - n / (p + 1) * (p - 1);
+                unsafe {
+                    // SAFETY: proven above.
+                    core::hint::assert_unchecked(n != 0);
+                }
+                self.pow_internal(n)
+            }
+
+            #[inline]
+            fn is_invertible(&self) -> bool {
+                self.value != 0
+            }
+
+            crate::macros::define_exgcd_inverse!(true);
         }
 
         impl Add for $ty {
@@ -306,7 +276,7 @@ macro_rules! define_type {
 
         #[cfg(test)]
         mod $test_mod {
-            use super::$ty;
+            use super::{Mod, $ty};
 
             crate::macros::test_ty!($ty as $native, $signed, shr = true);
 
@@ -323,39 +293,43 @@ macro_rules! define_type {
 
 define_type! {
     /// Arithmetic modulo `2^7 - 1 = 127`.
-    Mod7 as u8, i8, test in test7, k = 7
+    Prime7 as u8, i8, test in test7, k = 7
 }
 
 define_type! {
     /// Arithmetic modulo `2^13 - 1 = 8191`.
-    Mod13 as u16, i16, test in test13, k = 13
+    Prime13 as u16, i16, test in test13, k = 13
 }
 
 define_type! {
     /// Arithmetic modulo `2^31 - 1 = 2147483647`.
-    Mod31 as u32, i32, test in test31, k = 31
+    Prime31 as u32, i32, test in test31, k = 31
 }
 
 define_type! {
     /// Arithmetic modulo `2^61 - 1 = 2305843009213693951`.
-    Mod61 as u64, i64, test in test61, k = 61
+    Prime61 as u64, i64, test in test61, k = 61
 }
 
 #[cfg(doctest)]
 #[allow(dead_code, reason = "ad-hoc compile-fail test")]
 /// ```compile_fail
-/// mod2km1::prime::Mod7::ZERO.is::<{ 1 << 7 }>();
+/// use mod2k::Mod;
+/// mod2k::Prime7::ZERO.is::<{ 1 << 7 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::prime::Mod13::ZERO.is::<{ 1 << 13 }>();
+/// use mod2k::Mod;
+/// mod2k::Prime13::ZERO.is::<{ 1 << 13 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::prime::Mod31::ZERO.is::<{ 1 << 31 }>();
+/// use mod2k::Mod;
+/// mod2k::Prime31::ZERO.is::<{ 1 << 31 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::prime::Mod61::ZERO.is::<{ 1 << 61 }>();
+/// use mod2k::Mod;
+/// mod2k::Prime61::ZERO.is::<{ 1 << 61 }>();
 /// ```
 fn test_is() {}

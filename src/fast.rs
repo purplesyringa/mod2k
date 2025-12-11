@@ -1,8 +1,9 @@
 //! Arithmetic modulo `2^8 - 1`, `2^16 - 1`, `2^32 - 1`, and `2^64 - 1`.
 //!
 //! Most combinations of operations are compiled as efficiently as possible. A notable exception is
-//! comparison with a constant: prefer `x.is::<C>()` over `x == ModK::new(C)`.
+//! comparison with a constant: prefer `x.is::<C>()` over `x == FastK::new(C)`.
 
+use super::Mod;
 use core::ops::{Add, Mul, Neg, Shl, Shr, Sub};
 
 macro_rules! define_type {
@@ -12,46 +13,37 @@ macro_rules! define_type {
         test in $test_mod:ident,
         carmichael = $carmichael:literal
     ) => {
-        #[$meta]
-        ///
-        /// See [module-level documentation](self) for more information.
-        #[derive(Clone, Copy, Default)]
-        pub struct $ty {
-            /// Represents a zero remainder either as `0` or `T::MAX`, otherwise represents the
-            /// remainder exactly.
-            value: $native,
+        // The `value` field stores some value equivelent to `x` modulo `2^k - 1`: specifically, `0`
+        // can be represented as either `0` or `2^k - 1`.
+        crate::macros::define_type_basics! {
+            #[$meta]
+            $ty as $native,
+            shr = true
         }
-
-        crate::macros::define_type_basics!($ty as $native, shr = true);
 
         impl $ty {
             const MODULUS: $native = $native::MAX;
             const CARMICHAEL: u64 = $carmichael;
+        }
 
-            /// Create a value corresponding to `x mod (2^k - 1)`.
+        impl Mod for $ty {
+            type Native = $native;
+            const ZERO: Self = Self { value: 0 };
+            const ONE: Self = Self { value: 1 };
+
             #[inline]
-            pub const fn new(x: $native) -> Self {
+            fn new(x: $native) -> Self {
                 Self { value: x }
             }
 
-            /// Create a value corresponding to `x`, assuming `x < 2^k - 1`.
-            ///
-            /// This function is present for compatibility with prime moduli, for which
-            /// `from_remainder_unchecked` is faster than [`new`](Self::new). For fast moduli, the
-            /// performance is equivalent.
-            ///
-            /// # Safety
-            ///
-            /// This function is only valid to call if `x < 2^k - 1`.
             #[inline]
-            pub unsafe fn from_remainder_unchecked(x: $native) -> Self {
+            unsafe fn from_remainder_unchecked(x: $native) -> Self {
                 debug_assert!(x < Self::MODULUS);
                 Self { value: x }
             }
 
-            /// Get the normalized residue `x mod (2^k - 1)`.
             #[inline]
-            pub const fn remainder(self) -> $native {
+            fn remainder(self) -> $native {
                 if self.value == $native::MAX {
                     0
                 } else {
@@ -59,48 +51,29 @@ macro_rules! define_type {
                 }
             }
 
-            /// Get the internal optimized representation of the number.
-            ///
-            /// This returns some value equivalent to `x` modulo `2^k - 1`, but not necessarily
-            /// `x mod (2^k - 1)` itself. Specifically, a residue of `0` may be represented as
-            /// either `0` or `2^k - 1`. Passing this value back to [`new`](Self::new) is guaranteed
-            /// to produce the same value as `self`.
             #[inline]
-            pub const fn to_raw(self) -> $native {
+            fn to_raw(self) -> $native {
                 self.value
             }
 
-            /// Compare for equality with a constant.
-            ///
-            /// This is more efficient than `x == ModK::new(C)`. `C` must be a valid reminder, i.e.
-            /// not be equal to `2^k - 1`.
             #[inline]
-            pub const fn is<const C: $native>(self) -> bool {
+            fn is<const C: u64>(self) -> bool {
                 const {
-                    assert!(C < Self::MODULUS, "constant out of bounds");
+                    assert!(C < Self::MODULUS as u64, "constant out of bounds");
                 }
                 if C == 0 {
                     self.is_zero()
                 } else {
-                    self.value == C
+                    self.value == C as $native
                 }
             }
 
-            /// Compare for equality with zero.
-            ///
-            /// This is equialvent to `x.is::<0>()`.
             #[inline]
-            pub const fn is_zero(self) -> bool {
+            fn is_zero(&self) -> bool {
                 self.value == 0 || self.value == $native::MAX
             }
 
-            /// Compute `x^n mod (2^k - 1)`.
-            ///
-            /// The current implementation uses iterative binary exponentiation, combining it with
-            /// [the Carmichael function][1] to reduce exponents. It works in `O(log n)`.
-            ///
-            /// [1]: https://en.wikipedia.org/wiki/Carmichael_function#Exponential_cycle_length
-            pub fn pow(self, n: u64) -> Self {
+            fn pow(self, n: u64) -> Self {
                 if n == 0 {
                     return Self::ONE;
                 }
@@ -121,10 +94,7 @@ macro_rules! define_type {
                 self.pow_internal(new_n)
             }
 
-            /// Check if the value is invertible, i.e. if `x` is coprime with `2^k - 1`.
-            ///
-            /// The current implementation uses the binary Euclidean algorithm and works in `O(k)`.
-            pub fn is_invertible(self) -> bool {
+            fn is_invertible(&self) -> bool {
                 // LLVM optimizes out the "extended" part of the Euclidean algorithm.
                 self.inverse().is_some()
             }
@@ -230,7 +200,7 @@ macro_rules! define_type {
 
         #[cfg(test)]
         mod $test_mod {
-            use super::$ty;
+            use super::{Mod, $ty};
 
             crate::macros::test_ty!($ty as $native, $signed, shr = true);
             crate::macros::test_exact_raw!($ty as $native);
@@ -240,39 +210,43 @@ macro_rules! define_type {
 
 define_type! {
     /// Arithmetic modulo `2^8 - 1 = 3 * 5 * 17`.
-    Mod8 as u8, i8, test in test8, carmichael = 16
+    Fast8 as u8, i8, test in test8, carmichael = 16
 }
 
 define_type! {
     /// Arithmetic modulo `2^16 - 1 = 3 * 5 * 17 * 257`.
-    Mod16 as u16, i16, test in test16, carmichael = 256
+    Fast16 as u16, i16, test in test16, carmichael = 256
 }
 
 define_type! {
     /// Arithmetic modulo `2^32 - 1 = 3 * 5 * 17 * 257 * 65537`.
-    Mod32 as u32, i32, test in test32, carmichael = 65536
+    Fast32 as u32, i32, test in test32, carmichael = 65536
 }
 
 define_type! {
     /// Arithmetic modulo `2^64 - 1 = 3 * 5 * 17 * 257 * 641 * 65537 * 6700417`.
-    Mod64 as u64, i64, test in test64, carmichael = 17153064960
+    Fast64 as u64, i64, test in test64, carmichael = 17153064960
 }
 
 #[cfg(doctest)]
 #[allow(dead_code, reason = "ad-hoc compile-fail test")]
 /// ```compile_fail
-/// mod2km1::fast::Mod8::ZERO.is::<{ u8::MAX }>();
+/// use mod2k::Mod;
+/// mod2k::Fast8::ZERO.is::<{ u8::MAX as u64 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::fast::Mod16::ZERO.is::<{ u16::MAX }>();
+/// use mod2k::Mod;
+/// mod2k::Fast16::ZERO.is::<{ u16::MAX as u64 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::fast::Mod32::ZERO.is::<{ u32::MAX }>();
+/// use mod2k::Mod;
+/// mod2k::Fast32::ZERO.is::<{ u32::MAX as u64 }>();
 /// ```
 ///
 /// ```compile_fail
-/// mod2km1::fast::Mod64::ZERO.is::<{ u64::MAX }>();
+/// use mod2k::Mod;
+/// mod2k::Fast64::ZERO.is::<{ u64::MAX }>();
 /// ```
 fn test_is() {}

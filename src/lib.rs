@@ -19,9 +19,9 @@
 //! implementations of (2), (3), and (4) with a uniform interface, enabling you to try different
 //! options and find the best one. The supported moduli are:
 //!
-//! - Primes: `2^7 - 1`, `2^13 - 1`, `2^31 - 1`, `2^61 - 1`.
-//! - "Fast": `2^8 - 1`, `2^16 - 1`, `2^32 - 1`, `2^64 - 1`.
-//! - Powers of two: `2^8`, `2^16`, `2^32`, `2^64`.
+//! - [Primes](prime): `2^7 - 1`, `2^13 - 1`, `2^31 - 1`, `2^61 - 1`.
+//! - ["Fast"](fast): `2^8 - 1`, `2^16 - 1`, `2^32 - 1`, `2^64 - 1`.
+//! - [Powers of two](power): `2^8`, `2^16`, `2^32`, `2^64`.
 //!
 //! Generally speaking, "fast" moduli pay a cost of 1-3 additional instructions per operation
 //! compared to power-of-two moduli. Multiplication in `prime` is significantly slower than in
@@ -34,11 +34,12 @@
 //!
 //! ## API
 //!
-//! Types in this crate implement most primitive operations:
+//! All types in this crate implement the [`Mod`] trait. With [`Mod`] and built-in operations, you
+//! have access to most primitive operations:
 //!
 //! - `+`, `-` (both binary and unary), and `*` work straightforwardly.
-//! - [`inverse`](fast::Mod64::inverse) computes the multiplicative inverse if it exists, i.e. if
-//!   the argument `x` and the modulus are coprime.
+//! - [`inverse`](Mod::inverse) computes the multiplicative inverse if it exists, i.e. if the
+//!   argument `x` and the modulus are coprime.
 //! - `x / y` computes the product of `x` and the multiplicative inverse of `y`. If `y` is not
 //!   invertible, this operation panics. Note that computing inverses is slow, so they should
 //!   ideally computed once and then reused.
@@ -59,20 +60,9 @@ pub mod fast;
 mod macros;
 pub mod power;
 pub mod prime;
+mod traits;
 
-// #[inline(never)]
-// pub fn example(n: u64) -> u64 {
-//     (n as u32 as u64) % 31
-// }
-
-#[inline(never)]
-pub fn example(x: prime::Mod61, n: i64) -> prime::Mod61 {
-    // x.pow(n)
-    x << n
-    // if n < 61 { Some(x << n) } else { None }
-    // x.is_invertible()
-    // x << (n & 3)
-    // x >> (n & 3)
-    // Some(x >> 2)
-    // x - y
-}
+pub use fast::*;
+pub use power::*;
+pub use prime::*;
+pub use traits::Mod;
