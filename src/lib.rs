@@ -49,6 +49,11 @@
 //!   `2^k` moduli.)
 //! - `==` performs modular comparison.
 //! - [`Display`](core::fmt::Display) and related traits print the remainder.
+//!
+//!
+//! ## Bare metal support
+//!
+//! This is a `#![no_std]` crate.
 
 // Funnel shifts are useful for prime moduli, but aren't stabilized yet.
 // #![feature(funnel_shifts)]
