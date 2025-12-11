@@ -1,4 +1,8 @@
 [package]
 name = "mod2k"
+description = "Fast arithmetic modulo `2^k` and `2^k - 1`."
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/purplesyringa/mod2k"
+keywords = ["modulo", "modular", "modular-arithmetic"]
+categories = ["algorithms", "mathematics", "no-std", "no-std::no-alloc"]

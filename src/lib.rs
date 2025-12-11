@@ -53,6 +53,7 @@
 // Funnel shifts are useful for prime moduli, but aren't stabilized yet.
 // #![feature(funnel_shifts)]
 #![no_std]
+#![warn(clippy::cargo)]
 
 #[cfg(test)]
 extern crate std;
