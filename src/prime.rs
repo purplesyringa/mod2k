@@ -28,6 +28,19 @@ macro_rules! define_type {
             #[allow(unused, reason = "used by tests")]
             const CARMICHAEL: u64 = Self::MODULUS as u64 - 1;
 
+            /// Reduce a number up to `2 * m - 1`.
+            ///
+            /// # Safety
+            ///
+            /// `x <= 2 * m - 1` must hold.
+            #[inline]
+            unsafe fn reduce_2x(x: $native) -> Self {
+                let (diff, borrow) = x.overflowing_sub(Self::MODULUS);
+                // SAFETY: If `x < m`, this chooses `x`. If `x >= m`, this choses
+                // `x - m <= (2 * m - 1) - m < m`.
+                unsafe { Self::from_remainder_unchecked(if borrow { x } else { diff }) }
+            }
+
             #[inline]
             fn shift_internal(self, n: u32, left: bool) -> Self {
                 debug_assert!(n < $k);
@@ -85,9 +98,11 @@ macro_rules! define_type {
 
             #[inline]
             fn new(x: $native) -> Self {
-                Self {
-                    value: x % Self::MODULUS,
-                }
+                let low = x & ((1 << $k) - 1);
+                let high = x >> $k;
+                // SAFETY: `low <= m`, `high` is very small for `$k`s in question, thus
+                // `low + high <= 2 * m - 1`.
+                unsafe { Self::reduce_2x(low + high) }
             }
 
             #[inline]
@@ -158,11 +173,8 @@ macro_rules! define_type {
 
             #[inline]
             fn add(self, other: Self) -> Self {
-                let sum = self.value + other.value;
-                let (new_sum, borrow) = sum.overflowing_sub(Self::MODULUS);
-                // SAFETY: `x, y < 2^k - 1` implies `x + y < 2 * (2^k - 1)`. Subtracting `2^k - 1`
-                // if necessary guarantees the chosen sum is `< 2^k - 1`.
-                unsafe { Self::from_remainder_unchecked(if borrow { sum } else { new_sum }) }
+                // SAFETY: `x, y <= m - 1` implies `x + y <= 2 * m - 2`.
+                unsafe { Self::reduce_2x(self.value + other.value) }
             }
         }
 
@@ -175,8 +187,7 @@ macro_rules! define_type {
                 if borrow {
                     diff = diff.wrapping_add(Self::MODULUS);
                 }
-                // SAFETY: `-(2^k - 1) < x - y < 2^k - 1`, so after correcting negative numbers
-                // `diff < 2^k - 1`.
+                // SAFETY: `-m < x - y < m`, so after correcting negative numbers `diff < m`.
                 unsafe { Self::from_remainder_unchecked(diff) }
             }
         }
@@ -191,13 +202,9 @@ macro_rules! define_type {
                 let product = u128::from(self.value) * u128::from(other.value);
                 let low = (product as $native) & Self::MODULUS;
                 let high = (product >> $k) as $native;
-                // Can't use `+` from `Self` here because `low` and `high` might be equal to
-                // `2^k - 1`, and calling `from_remainder_unchecked` on that is UB.
-                let sum = low + high;
-                let (new_sum, borrow) = sum.overflowing_sub(Self::MODULUS);
-                // SAFETY: `low` and `high` can't both be equal to `2^k - 1`, so
-                // `sum < 2 * (2^k - 1)`, which can be reduced straightforwardly.
-                unsafe { Self::from_remainder_unchecked(if borrow { sum } else { new_sum }) }
+                // SAFETY: `low, high <= m`. Both can't be equal to `m` at the same time, so
+                // `low + high <= 2 * m - 1`.
+                unsafe { Self::reduce_2x(low + high) }
             }
         }
 
