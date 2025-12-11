@@ -251,7 +251,7 @@ macro_rules! define_type {
             #[inline]
             fn shl(self, n: i64) -> Self {
                 self.shift_internal(
-                    if 0 <= n && n < $k {
+                    if (0..$k).contains(&n) {
                         n as u32
                     } else {
                         n.rem_euclid($k) as u32
@@ -277,7 +277,7 @@ macro_rules! define_type {
             #[inline]
             fn shr(self, n: i64) -> Self {
                 self.shift_internal(
-                    if 0 <= n && n < $k {
+                    if (0..$k).contains(&n) {
                         n as u32
                     } else {
                         n.rem_euclid($k) as u32

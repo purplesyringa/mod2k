@@ -66,9 +66,9 @@ pub mod prime;
 // }
 
 #[inline(never)]
-pub fn example(x: power::Mod64, n: u64) -> power::Mod64 {
-    x.pow(n)
-    // x << n
+pub fn example(x: prime::Mod61, n: i64) -> prime::Mod61 {
+    // x.pow(n)
+    x << n
     // if n < 61 { Some(x << n) } else { None }
     // x.is_invertible()
     // x << (n & 3)
