@@ -133,10 +133,6 @@ macro_rules! define_exgcd_inverse {
         fast_shr = $fast_shr:literal
     ) => {
         fn inverse(self) -> Option<Self> {
-            if self.is_zero() {
-                return None;
-            }
-
             // `$limited_value` indicates `value <= MODULUS`.
             let mut x = if $limited_value {
                 self.value
@@ -144,6 +140,15 @@ macro_rules! define_exgcd_inverse {
                 self.remainder()
             };
             let mut y = Self::MODULUS;
+
+            let is_zero = if $limited_value {
+                self.is_zero()
+            } else {
+                x == 0
+            };
+            if is_zero {
+                return None;
+            }
 
             // Binary extended Euclidean algorithm a la https://eprint.iacr.org/2020/972.pdf
             // (Optimized Binary GCD for Modular Inversion, Thomas Pornin).
