@@ -168,6 +168,13 @@ macro_rules! define_type {
                 // with the smallest optimal type.
                 let product = u128::from(self.value) * u128::from(other.value);
 
+                if $native::BITS < 64 {
+                    // If the product fits in the native word size, LLVM is great at optimizing it
+                    // with Barrett reduction.
+                    return Self::new((product % Self::MODULUS as u128) as $native);
+                }
+
+                // Use a smarter algorithm for large moduli, based on `d` being small.
                 let mut low = product as $native;
                 let mut high = (product >> $native::BITS) as $native;
 
