@@ -24,7 +24,6 @@ macro_rules! define_type {
         }
 
         impl $ty {
-            const MODULUS: $native = (1 << $k) - 1;
             #[allow(unused, reason = "used by tests")]
             const CARMICHAEL: u64 = Self::MODULUS as u64 - 1;
 
@@ -38,7 +37,7 @@ macro_rules! define_type {
                 let (diff, borrow) = x.overflowing_sub(Self::MODULUS);
                 // SAFETY: If `x < m`, this chooses `x`. If `x >= m`, this choses
                 // `x - m <= (2 * m - 1) - m < m`.
-                unsafe { Self::from_remainder_unchecked(if borrow { x } else { diff }) }
+                unsafe { Self::new_unchecked(if borrow { x } else { diff }) }
             }
 
             #[inline]
@@ -87,12 +86,13 @@ macro_rules! define_type {
 
                 // SAFETY: The rotation fits in `k` bits by definition, and it can't be all ones
                 // because the input can't be all ones.
-                unsafe { Self::from_remainder_unchecked(x) }
+                unsafe { Self::new_unchecked(x) }
             }
         }
 
         impl Mod for $ty {
             type Native = $native;
+            const MODULUS: $native = (1 << $k) - 1;
             const ZERO: Self = Self { value: 0 };
             const ONE: Self = Self { value: 1 };
 
@@ -106,7 +106,7 @@ macro_rules! define_type {
             }
 
             #[inline]
-            unsafe fn from_remainder_unchecked(x: $native) -> Self {
+            unsafe fn new_unchecked(x: $native) -> Self {
                 debug_assert!(x < Self::MODULUS);
                 Self { value: x }
             }
@@ -192,7 +192,7 @@ macro_rules! define_type {
                     diff = diff.wrapping_add(Self::MODULUS);
                 }
                 // SAFETY: `-m < x - y < m`, so after correcting negative numbers `diff < m`.
-                unsafe { Self::from_remainder_unchecked(diff) }
+                unsafe { Self::new_unchecked(diff) }
             }
         }
 
@@ -221,7 +221,7 @@ macro_rules! define_type {
                     Self::ZERO
                 } else {
                     // SAFETY: `value > 0` implies `MODULUS - value < MODULUS`.
-                    unsafe { Self::from_remainder_unchecked(Self::MODULUS - self.value) }
+                    unsafe { Self::new_unchecked(Self::MODULUS - self.value) }
                 }
             }
         }

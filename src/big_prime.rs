@@ -26,7 +26,6 @@ macro_rules! define_type {
         }
 
         impl $ty {
-            const MODULUS: $native = ($d as $native).wrapping_neg();
             #[allow(unused, reason = "used by tests")]
             const CARMICHAEL: u64 = Self::MODULUS as u64 - 1;
 
@@ -64,6 +63,7 @@ macro_rules! define_type {
 
         impl Mod for $ty {
             type Native = $native;
+            const MODULUS: $native = ($d as $native).wrapping_neg();
             const ZERO: Self = Self { value: 0 };
             const ONE: Self = Self { value: 1 };
 
@@ -73,7 +73,7 @@ macro_rules! define_type {
             }
 
             #[inline]
-            unsafe fn from_remainder_unchecked(x: $native) -> Self {
+            unsafe fn new_unchecked(x: $native) -> Self {
                 debug_assert!(x < Self::MODULUS);
                 Self { value: x }
             }

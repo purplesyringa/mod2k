@@ -5,6 +5,12 @@ pub trait Mod: Sized {
     /// The underlying native type.
     type Native;
 
+    /// The value of the modulus, or `0` if it is a power of two.
+    ///
+    /// `0` is used because the full value `2^k` does not fit in a `k`-bit integer, so it overflows
+    /// to `0`.
+    const MODULUS: Self::Native;
+
     /// A constant `0` value.
     const ZERO: Self;
 
@@ -15,17 +21,18 @@ pub trait Mod: Sized {
     #[must_use]
     fn new(x: Self::Native) -> Self;
 
-    /// Create a value corresponding to `x`, assuming `x < m`.
+    /// Create a value corresponding to `x`, assuming `x` is a correct representation for this type.
     ///
-    /// This function is most useful for prime moduli, for which `from_remainder_unchecked` is
-    /// faster than [`new`](Self::new). For fast and power-of-two moduli, the performance is
-    /// equivalent.
+    /// This function is most useful for prime moduli, since it's faster than [`new`](Self::new) for
+    /// those types.
     ///
     /// # Safety
     ///
-    /// This function is only valid to call if `x` is less than the modulus.
+    /// This function is guaranteed to be safe to call under if either of the two conditions holds:
+    /// - `x` is less than the modulus, or
+    /// - `x` was produced by [`to_raw`](Self::to_raw) on the same type.
     #[must_use]
-    unsafe fn from_remainder_unchecked(x: Self::Native) -> Self;
+    unsafe fn new_unchecked(x: Self::Native) -> Self;
 
     /// Get the normalized residue `x mod m`.
     #[must_use]
@@ -35,7 +42,8 @@ pub trait Mod: Sized {
     ///
     /// This returns some value equivalent to `x` modulo `m`, but not necessarily `x mod m` itself.
     /// This is more efficient than [`remainder`](Self::remainder) for prime moduli. Passing this
-    /// value back to [`new`](Self::new) is guaranteed to produce the same value as `self`.
+    /// value to [`new`](Self::new) or [`new_unchecked`](Self::new_unchecked)
+    /// is guaranteed to produce the same value as `self`.
     #[must_use]
     fn to_raw(self) -> Self::Native;
 

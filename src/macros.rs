@@ -384,7 +384,7 @@ macro_rules! test_ty {
         #[test]
         fn constructors() {
             assert_eq!($ty::new(5).remainder(), 5);
-            assert_eq!(unsafe { $ty::from_remainder_unchecked(5) }.remainder(), 5);
+            assert_eq!(unsafe { $ty::new_unchecked(5) }.remainder(), 5);
         }
 
         #[test]

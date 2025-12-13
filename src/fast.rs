@@ -22,12 +22,12 @@ macro_rules! define_type {
         }
 
         impl $ty {
-            const MODULUS: $native = $native::MAX;
             const CARMICHAEL: u64 = $carmichael;
         }
 
         impl Mod for $ty {
             type Native = $native;
+            const MODULUS: $native = $native::MAX;
             const ZERO: Self = Self { value: 0 };
             const ONE: Self = Self { value: 1 };
 
@@ -37,7 +37,7 @@ macro_rules! define_type {
             }
 
             #[inline]
-            unsafe fn from_remainder_unchecked(x: $native) -> Self {
+            unsafe fn new_unchecked(x: $native) -> Self {
                 debug_assert!(x < Self::MODULUS);
                 Self { value: x }
             }
