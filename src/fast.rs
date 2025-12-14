@@ -25,6 +25,7 @@ macro_rules! define_type {
             const CARMICHAEL: u64 = $carmichael;
         }
 
+        impl crate::traits::sealed::Sealed for $ty {}
         impl Mod for $ty {
             type Native = $native;
             const MODULUS: $native = $native::MAX;

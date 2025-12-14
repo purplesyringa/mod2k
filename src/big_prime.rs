@@ -61,6 +61,7 @@ macro_rules! define_type {
             }
         }
 
+        impl crate::traits::sealed::Sealed for $ty {}
         impl Mod for $ty {
             type Native = $native;
             const MODULUS: $native = ($d as $native).wrapping_neg();

@@ -29,6 +29,7 @@ macro_rules! define_type {
             const CARMICHAEL: u64 = 1 << ($native::BITS - 2);
         }
 
+        impl crate::traits::sealed::Sealed for $ty {}
         impl Mod for $ty {
             type Native = $native;
             const MODULUS: $native = 0;

@@ -1,7 +1,11 @@
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
 /// A common interface for modular arithmetic.
 ///
 /// This trait is implemented by all types in this crate.
-pub trait Mod: Sized {
+pub trait Mod: Sized + sealed::Sealed {
     /// The underlying native type.
     type Native;
 
