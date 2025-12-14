@@ -30,28 +30,40 @@ macro_rules! define_type {
             #[allow(unused, reason = "used by tests")]
             const CARMICHAEL: u64 = Self::MODULUS as u64 - 1;
 
-            #[inline(always)]
-            fn shift_internal(self, q: i64, r: u32, left: bool) -> Self {
+            #[inline]
+            fn shift_fast_path<const LEFT: bool>(self, n: u32) -> Self {
+                let factor = if LEFT {
+                    // Multiplication is optimized to shifts somewhat suboptimally due to [1]. If
+                    // bitwise `&` is present in the source, codegen is suboptimal due to [2].
+                    // [1]: https://github.com/llvm/llvm-project/issues/172097
+                    // [2]: https://github.com/llvm/llvm-project/issues/171920
+                    Self::new(1 << n)
+                } else {
+                    // `x * 2^(-n) = x * d^-1 * 2^(k - n)`. We can either compute this as
+                    // `x * (d^-1 * 2^(k - n))` or `(x * d^-1) * 2^(k - n)`. There is a single
+                    // multiplication and a single shift either way, but the former optimizes better
+                    // for constant `n`, so it's preferable.
+                    select_unpredictable(
+                        n == 0,
+                        Self::ONE,
+                        Self::new($d_inv) * Self::new(1 << (n.wrapping_neg() % $native::BITS)),
+                    )
+                };
+
+                self * factor
+            }
+
+            #[cold]
+            fn shift_slow_path<const LEFT: bool>(self, q: i64, r: u32) -> Self {
+                debug_assert!(q != 0);
                 debug_assert!(r < $native::BITS);
 
-                // For constant `n`, the factor is computed in compile time.
-                //
-                // For constant `q = 0`, `pow_internal` is optimized out.
-                let factor = if left {
-                    // Calculate `2^(kq + r)` as `d^q * 2^r`.
-                    //
-                    // Reduces to `x * 2^r` for `q = 0`, using shifts instead of multiplication on
-                    // the first reduction step. Slightly suboptimal due to [1].
-                    // [1]: https://github.com/llvm/llvm-project/issues/171920
+                // For constant `q` and `r`, the factor is computed in compile time.
+                let factor = if LEFT {
+                    // `2^(kq + r) = d^q * 2^r`.
                     Self::new($d).pow_internal(q.rem_euclid($d_order) as u64, Self::new(1 << r))
                 } else {
-                    // Calculate `2^(-(kq + r))` as `((d^-1)^(q + 1) * 2^(k - r))`.
-                    //
-                    // Suboptimal lowering for constant `n = 0` because `factor` is computed as
-                    // `2^k - d + 1`, not `1` exactly. Hopefully not too big of a deal.
-                    //
-                    // `q = 0` leaves two multiplications, but improving this further requires
-                    // faster multiplication algorithms in general.
+                    // `2^(-(kq + r)) = ((d^-1)^(q + 1) * 2^(k - r))`.
                     Self::new($d_inv).pow_internal(
                         (q + 1).rem_euclid($d_order) as u64,
                         Self::ONE << ($native::BITS - r),
@@ -212,48 +224,64 @@ macro_rules! define_type {
         impl Shl<i64> for $ty {
             type Output = Self;
 
+            #[inline]
             fn shl(self, n: i64) -> Self {
-                self.shift_internal(
-                    n.div_euclid($native::BITS as i64),
-                    n.rem_euclid($native::BITS as i64) as u32,
-                    true,
-                )
+                if (0..$native::BITS as i64).contains(&n) {
+                    self.shift_fast_path::<true>(n as u32)
+                } else {
+                    self.shift_slow_path::<true>(
+                        n.div_euclid($native::BITS as i64),
+                        n.rem_euclid($native::BITS as i64) as u32,
+                    )
+                }
             }
         }
 
         impl Shl<u64> for $ty {
             type Output = Self;
 
+            #[inline]
             fn shl(self, n: u64) -> Self {
-                self.shift_internal(
-                    (n / $native::BITS as u64) as i64,
-                    (n as u64 % $native::BITS as u64) as u32,
-                    true,
-                )
+                if n < $native::BITS as u64 {
+                    self.shift_fast_path::<true>(n as u32)
+                } else {
+                    self.shift_slow_path::<true>(
+                        (n / $native::BITS as u64) as i64,
+                        (n as u64 % $native::BITS as u64) as u32,
+                    )
+                }
             }
         }
 
         impl Shr<i64> for $ty {
             type Output = Self;
 
+            #[inline]
             fn shr(self, n: i64) -> Self {
-                self.shift_internal(
-                    n.div_euclid($native::BITS as i64),
-                    n.rem_euclid($native::BITS as i64) as u32,
-                    false,
-                )
+                if (0..$native::BITS as i64).contains(&n) {
+                    self.shift_fast_path::<false>(n as u32)
+                } else {
+                    self.shift_slow_path::<false>(
+                        n.div_euclid($native::BITS as i64),
+                        n.rem_euclid($native::BITS as i64) as u32,
+                    )
+                }
             }
         }
 
         impl Shr<u64> for $ty {
             type Output = Self;
 
+            #[inline]
             fn shr(self, n: u64) -> Self {
-                self.shift_internal(
-                    (n / $native::BITS as u64) as i64,
-                    (n as u64 % $native::BITS as u64) as u32,
-                    false,
-                )
+                if n < $native::BITS as u64 {
+                    self.shift_fast_path::<false>(n as u32)
+                } else {
+                    self.shift_slow_path::<false>(
+                        (n / $native::BITS as u64) as i64,
+                        (n as u64 % $native::BITS as u64) as u32,
+                    )
+                }
             }
         }
 
