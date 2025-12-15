@@ -90,9 +90,13 @@ macro_rules! define_type {
                 if self.value & 1 == 0 {
                     return None;
                 }
-                let mut x = self;
-                for _ in 0..$native::BITS.ilog2() {
-                    x *= Self::new(2) - self * x;
+                // This seeds the algorihtm with 5 bits of precision, according to [1].
+                // [1]: https://arxiv.org/pdf/1303.0328
+                let mut x = Self::new(self.value.wrapping_mul(3) ^ 2);
+                let mut y = Self::ONE - self * x;
+                for _ in 2..$native::BITS.ilog2() {
+                    x *= Self::ONE + y;
+                    y *= y;
                 }
                 Some(x)
             }

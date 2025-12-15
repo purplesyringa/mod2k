@@ -88,10 +88,10 @@ pub trait Mod: Sized + sealed::Sealed {
     /// Returns `None` if `x` is not coprime with `m`.
     ///
     /// For fast and prime moduli, the current implementation uses the iterative binary extended
-    /// Euclidean algorithm, which works in `O(k)`. For power-of-two moduli, it uses [Hensel
-    /// lifting][hensel], which works in `O(log k)`.
+    /// Euclidean algorithm, which works in `O(k)`. For power-of-two moduli, it uses [an algorithm
+    /// by Hurchalla][hurchalla], which works in `O(log k)`.
     ///
-    /// [hensel]: https://en.wikipedia.org/wiki/Modular_multiplicative_inverse#Inverses_modulo_prime_powers_(including_powers_of_2)
+    /// [hurchalla]: https://arxiv.org/abs/2204.04342
     #[must_use]
     fn inverse(self) -> Option<Self>;
 }
