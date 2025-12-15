@@ -170,21 +170,25 @@ macro_rules! define_exgcd_inverse {
             //
             // For binary Euclidean algorithm, `A_i` can contain division by powers of two, so both
             // `A_i` and `(s t)` are computed modulo `m`, since we're only interested in `a mod m`
-            // anyway and dividing by two `mod m` is cheap.
+            // anyway and dividing by two `mod m` is usually cheap.
+            //
+            // The structure of binary GCD is taken from:
+            // - https://en.algorithmica.org/hpc/algorithms/gcd/
+            // - https://lemire.me/blog/2024/04/13/greatest-common-divisor-the-extended-euclidean-algorithm-and-speed/
 
             let mut s = Self::ONE;
             let mut t = Self::ZERO;
             let mut total_k = 0;
 
             // At the start of each iteration, `x` is non-zero and `y` is odd.
+            let mut k = x.trailing_zeros();
             while x != 0 {
                 // Teach the optimizer that `k` is small.
                 // SAFETY: Initially, `max(x, y) <= MODULUS`. Each iteration can only reduce the
-                // maximum.
+                // maximum. Thus, `2^k <= x <= MODULUS`.
                 unsafe {
-                    core::hint::assert_unchecked(x <= Self::MODULUS);
+                    core::hint::assert_unchecked(k <= Self::MODULUS.ilog2());
                 }
-                let k = x.trailing_zeros();
                 x >>= k;
                 if $fast_shr {
                     s >>= k;
@@ -194,11 +198,15 @@ macro_rules! define_exgcd_inverse {
                     total_k += k;
                     t <<= k;
                 }
-                if x < y {
-                    core::mem::swap(&mut x, &mut y);
-                    core::mem::swap(&mut s, &mut t);
-                }
-                x -= y;
+
+                // (x, y) -> (|x - y|, min(x, y))
+                let diff_xy = x.wrapping_sub(y);
+                k = diff_xy.trailing_zeros(); // `|x - y|` has the same ctz as `x - y`
+                (x, y, s, t) = core::hint::select_unpredictable(
+                    x < y,
+                    (diff_xy.wrapping_neg(), x, t, s),
+                    (diff_xy, y, s, t),
+                );
                 s -= t;
             }
 
