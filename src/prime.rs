@@ -140,21 +140,18 @@ macro_rules! define_type {
                 if n == 0 {
                     return Self::ONE;
                 }
-                // For prime moduli `p` and `x != 0`, FLT enables taking `n` modulo `p - 1`. We
-                // instead use the adjustment
-                //     n' = n - n // (p + 1) * (p - 1)
-                // ...which is only slightly worse, but can be computed much faster since `p + 1`
-                // is a power of two.
+                // We want to improve worst-case performance with Fermat's little theorem by taking
+                // `n` modulo `p - 1`, at least for `x != 0`.
                 //
-                // It also turns out that `n > 0` implies `n' > 0`, since in
-                //     n - n // (p + 1) * (p - 1) >= n - n // (p - 1) * (p - 1) >= 0
-                // ...both equalities cannot hold at the same time: the second equality requires
-                // `n = (p - 1) * k`, but for such `n`
-                //     n // (p + 1) <= n / (p + 1) < k = n // (p - 1)
-                // ...so the first equality can't hold. This allows the formula to be used even for
-                // `x = 0`.
-                let p = Self::MODULUS as u64;
-                let n = n - n / (p + 1) * (p - 1);
+                // To avoid regressing the cases where `n` is already small, we speed up the
+                // reduction with a Barrett-style trick, which produces only slightly out-of-bounds
+                // remainders.
+                let q = ((n as u128 * (u64::MAX / Self::CARMICHAEL) as u128) >> 64) as u64;
+                let n = n - q * Self::CARMICHAEL;
+                // It's easy to show `q < n / (p - 1)`, so subtraction doesn't overflow. This also
+                // implies `n` never becomes zero, so we don't have to handle `x = 0` explicitly.
+                // It can also be shown that the resulting `n < 2p - 1`, i.e. there can be at most
+                // one more bit than optimal, which we can live with.
                 unsafe {
                     // SAFETY: proven above.
                     core::hint::assert_unchecked(n != 0);

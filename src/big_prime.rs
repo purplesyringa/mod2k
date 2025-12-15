@@ -123,10 +123,9 @@ macro_rules! define_type {
                 if n == 0 {
                     return Self::ONE;
                 }
-                // `prime.rs` demonstrates that the adjustment
-                //     n' = n - n // 2^k * (p - 1)
-                // ...works for all `x`.
-                let n = n - n.unbounded_shr($native::BITS) * (Self::MODULUS as u64 - 1);
+                // The same logic as in `prime.rs`.
+                let q = ((n as u128 * (u64::MAX / Self::CARMICHAEL) as u128) >> 64) as u64;
+                let n = n - q * Self::CARMICHAEL;
                 unsafe {
                     // SAFETY: proven in `prime.rs`.
                     core::hint::assert_unchecked(n != 0);
