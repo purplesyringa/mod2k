@@ -129,7 +129,7 @@ pub(crate) use forward_shift_op;
 // This implements Stein's GCD algorithm using the general structure from:
 // - https://en.algorithmica.org/hpc/algorithms/gcd/
 // - https://lemire.me/blog/2024/04/13/greatest-common-divisor-the-extended-euclidean-algorithm-and-speed/
-// ...and extends it a la https://eprint.iacr.org/2020/972.pd (Optimized Binary GCD for Modular
+// ...and extends it a la https://eprint.iacr.org/2020/972.pdf (Optimized Binary GCD for Modular
 // Inversion, Thomas Pornin).
 //
 // In a nutshell, we perform some linear operations on `x` and `y`, so there exist some `a, b` such
@@ -144,14 +144,14 @@ pub(crate) use forward_shift_op;
 // - If it's expensive, we can work in fixed point and convert to modular at the end. We prove that
 //   a signed numeric type twice as long as the input is sufficient below.
 macro_rules! define_exgcd_inverse {
-    ($ty:tt, prime = $prime:literal, strategy = builtin) => {
+    (prime = $prime:literal, strategy = builtin) => {
         fn inverse(self) -> Option<Self> {
             if self.is_zero() {
                 return None;
             }
 
-            let mut x = self.value;
-            let mut y = Self::MODULUS;
+            let mut x = self.value as u64;
+            let mut y = Self::MODULUS as u64;
             let mut u = Self::ONE;
             let mut v = Self::ZERO;
 
@@ -185,43 +185,20 @@ macro_rules! define_exgcd_inverse {
         }
     };
 
-    // `$modulus_inv = MODULUS^-1 mod 2^(2k - 2)`.
-    ($ty:tt, prime = $prime:literal, strategy = inv $modulus_inv:literal) => {
+    // `$modulus_inv = MODULUS^-1 mod 2^62`.
+    (prime = $prime:literal, strategy = short with $modulus_inv:literal) => {
         fn inverse(self) -> Option<Self> {
             if self.is_zero() {
                 return None;
             }
 
-            pub trait DoubleWidth {
-                type Ty;
-                type Signed;
-            }
-            impl DoubleWidth for u8 {
-                type Ty = u16;
-                type Signed = i16;
-            }
-            impl DoubleWidth for u16 {
-                type Ty = u32;
-                type Signed = i32;
-            }
-            impl DoubleWidth for u32 {
-                type Ty = u64;
-                type Signed = i64;
-            }
-            impl DoubleWidth for u64 {
-                type Ty = u128;
-                type Signed = i128;
-            }
-            type Double = <<$ty as Mod>::Native as DoubleWidth>::Ty;
-            type DoubleSigned = <<$ty as Mod>::Native as DoubleWidth>::Signed;
-
-            let mut x = self.value;
-            let mut y = Self::MODULUS;
+            let mut x = self.value as u64;
+            let mut y = Self::MODULUS as u64;
 
             // The two highest bits form the whole part, the rest form the fractional part. The
             // value is signed.
-            let mut u = (1 as DoubleSigned) << (Double::BITS - 2);
-            let mut v = 0 as DoubleSigned;
+            let mut u = 1i64 << 62;
+            let mut v = 0i64;
 
             // At the start of each iteration, `x` is non-zero and `y` is odd.
             let mut q = x.trailing_zeros();
@@ -278,7 +255,7 @@ macro_rules! define_exgcd_inverse {
             // This is a value between `1` and `-(MODULUS - 1)`, since we know `0` cannot be
             // an inverse, so this can be straightforwardly translated to a remainder.
             let factor = v.unsigned_abs().wrapping_mul($modulus_inv << 2);
-            let neg_rem = factor.carrying_mul(Self::MODULUS as Double, 0).1 as Self::Native;
+            let neg_rem = factor.carrying_mul(Self::MODULUS as u64, 0).1 as Self::Native;
             Some(Self::new(if factor == 0 {
                 // Only occurs for `v = 2^(Double::BITS - 2)`. Sadly this has to be handled
                 // explicitly.
@@ -288,6 +265,130 @@ macro_rules! define_exgcd_inverse {
             } else {
                 neg_rem
             }))
+        }
+    };
+
+    // `$modulus_inv = MODULUS^-1 mod 2^63`.
+    (prime = $prime:literal, strategy = long with $modulus_inv:literal) => {
+        fn inverse(self) -> Option<Self> {
+            use core::simd::{mask64x2, u64x2};
+
+            if self.is_zero() {
+                return None;
+            }
+
+            let mut x = self.value;
+            let mut y = Self::MODULUS;
+            let mut u = Self::ONE;
+            let mut v = Self::ZERO;
+
+            // The matrix transforming `(u, v)` to `(u', v')`:
+            // (u') = (f0 g0) (u)
+            // (v')   (f1 g1) (v)
+            // The coefficients are implicitly multiplied by `2^(63 - precision_left)`, so that they
+            // can be stored as integers. They are signed, but stored in an unusual format that
+            // represents values `-2^63 + 1..=2^63` instead of the usual `-2^63..=2^63 - 1`; that
+            // is, the bit pattern `100..000` represents `2^63` and not `-2^63`.
+            let identity = (u64x2::from([1, 0]), u64x2::from([0, 1]));
+            let (mut u_coeffs, mut v_coeffs) = identity;
+            let mut precision_left = 63;
+
+            let fp_to_modular = |x: u64| -> Self {
+                // Get 1 out of the way quickly, since it makes handling of signed numbers difficult
+                // and REDC doesn't handle it correctly.
+                if x == 1 << 63 {
+                    return Self::ONE;
+                }
+                let x = x as i64;
+                // Compute `x / 2^63 mod MODULUS` with REDC.
+                //
+                // For non-negative `x`, take
+                //     x' = x - ((x * MODULUS^-1) mod 2^63) * MODULUS
+                // Then `x' = x (mod MODULUS)` and `x' = 0 (mod 2^63)`, so
+                //     x / 2^63 = x' >> 63 (mod MODULUS)
+                // Since the bottom 63 bits of `x` and the subtrahend are equal, and the bits above
+                // that position in `x` are zero (unless `x = 2^63`, which we handle explicitly),
+                // that's equal to
+                //     -(((x * MODULUS^-1) mod 2^63) * MODULUS) >> 63
+                // which can be computed more efficiently as
+                //     -(((x * (MODULUS^-1 << 1)) mod 2^64) * MODULUS) >> 64
+                // This is a value between `0` and `-(MODULUS - 1)`, so this can be
+                // straightforwardly translated to a remainder.
+                let factor = x.unsigned_abs().wrapping_mul($modulus_inv << 1);
+                let neg_rem = factor.carrying_mul(Self::MODULUS as u64, 0).1 as Self::Native;
+                Self::new(if x >= 0 {
+                    Self::MODULUS - neg_rem
+                } else {
+                    neg_rem
+                })
+            };
+
+            let mut flush =
+                |precision_left: &mut u32, u_coeffs: &mut u64x2, v_coeffs: &mut u64x2| {
+                    *u_coeffs <<= *precision_left as u64;
+                    *v_coeffs <<= *precision_left as u64;
+
+                    let ([f0, g0], [f1, g1]) = (u_coeffs.to_array(), v_coeffs.to_array());
+                    let [f0, g0, f1, g1] = [f0, g0, f1, g1].map(fp_to_modular);
+                    (u, v) = (f0 * u + g0 * v, f1 * u + g1 * v);
+
+                    *precision_left = 63;
+                    (*u_coeffs, *v_coeffs) = identity;
+                };
+
+            // At the start of each iteration, `x` is non-zero and `y` is odd.
+            let mut q = x.trailing_zeros();
+            while x != 0 {
+                x >>= q;
+                // At any point, `current x <= max(initial x, initial y)`, thus
+                //     q <= len(x) - 1 <= len(max(initial x, initial y)) - 1 <= k - 1 <= 63
+                // and we never get into a situation where the shift is too large to be performed
+                // with a single flush.
+                if core::hint::unlikely(q >= precision_left) {
+                    // Split into two steps.
+                    q -= precision_left;
+                    v_coeffs <<= precision_left as u64;
+                    precision_left = 0;
+                    flush(&mut precision_left, &mut u_coeffs, &mut v_coeffs);
+                    // `precision` is never allowed to get higher than 62. At this point, `q <= 62`.
+                }
+                precision_left -= q;
+                v_coeffs <<= q as u64;
+
+                // (x, y) -> (|y - x|, min(x, y))
+                let diff_yx = y.wrapping_sub(x);
+                q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
+                let mask = mask64x2::splat(x < y);
+                (u_coeffs, v_coeffs) = (
+                    mask.select(v_coeffs, u_coeffs),
+                    mask.select(u_coeffs, v_coeffs),
+                );
+                (x, y) = core::hint::select_unpredictable(
+                    x < y,
+                    (diff_yx, x),
+                    (diff_yx.wrapping_neg(), y),
+                );
+                u_coeffs -= v_coeffs;
+
+                // At this point in the loop,
+                //     -2^(precision+1) < f0, g0 < 2^(precision+1)
+                //     -2^precision < f1, g1 <= 2^precision
+                // This clearly holds on the first iteration and after each flush. On the successive
+                // iterations, we'll first shift `v_coeffs` by some `q > 0`, resulting in
+                //     -2^(precision+1) < f0, g0 < 2^(precision+1)
+                //     -2^precision' < f1, g1 <= 2^precision'
+                // and then perform a conditional swap and subtraction, resulting in
+                //     -2^(precision'+1) < f0, g0 < 2^(precision'+1)
+                //     -2^precision' < f1, g1 <= 2^precision'
+                // ...once we reach this point again.
+                //
+                // Thus `precision+2`-bit numbers suffice. The maximum value of `precision` at the
+                // relevant places is 62, since we flush as soon as `precision` reaches 63. 64-bit
+                // numbers is exactly what we have.
+            }
+
+            flush(&mut precision_left, &mut u_coeffs, &mut v_coeffs);
+            ($prime || y == 1).then_some(v)
         }
     };
 }

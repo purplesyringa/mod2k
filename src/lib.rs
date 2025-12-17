@@ -57,7 +57,7 @@
 //! This is a `#![no_std]` crate.
 
 // Funnel shifts are useful for prime moduli, but aren't stabilized yet.
-// #![feature(funnel_shifts)]
+#![feature(funnel_shifts, likely_unlikely, portable_simd)]
 #![no_std]
 #![warn(clippy::cargo)]
 

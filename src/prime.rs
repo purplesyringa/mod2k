@@ -15,7 +15,8 @@ macro_rules! define_type {
         #[$meta:meta]
         $ty:ident as $native:ident, $signed:ident,
         test in $test_mod:ident,
-        k = $k:literal
+        k = $k:literal,
+        inv_strategy = $($inv_strategy:tt)*
     ) => {
         // The `value` field stores the remainder.
         crate::macros::define_type_basics! {
@@ -164,7 +165,7 @@ macro_rules! define_type {
                 self.value != 0
             }
 
-            crate::macros::define_exgcd_inverse!($ty, prime = true, strategy = builtin);
+            crate::macros::define_exgcd_inverse!(prime = true, strategy = $($inv_strategy)*);
         }
 
         impl Add for $ty {
@@ -300,22 +301,22 @@ macro_rules! define_type {
 
 define_type! {
     /// Arithmetic modulo `2^7 - 1 = 127`.
-    Prime7 as u8, i8, test in test7, k = 7
+    Prime7 as u8, i8, test in test7, k = 7, inv_strategy = builtin
 }
 
 define_type! {
     /// Arithmetic modulo `2^13 - 1 = 8191`.
-    Prime13 as u16, i16, test in test13, k = 13
+    Prime13 as u16, i16, test in test13, k = 13, inv_strategy = builtin
 }
 
 define_type! {
     /// Arithmetic modulo `2^31 - 1 = 2147483647`.
-    Prime31 as u32, i32, test in test31, k = 31
+    Prime31 as u32, i32, test in test31, k = 31, inv_strategy = builtin
 }
 
 define_type! {
     /// Arithmetic modulo `2^61 - 1 = 2305843009213693951`.
-    Prime61 as u64, i64, test in test61, k = 61
+    Prime61 as u64, i64, test in test61, k = 61, inv_strategy = builtin
 }
 
 #[cfg(doctest)]

@@ -13,7 +13,7 @@ macro_rules! define_type {
         $ty:ident as $native:ident, $signed:ident,
         test in $test_mod:ident,
         carmichael = $carmichael:literal,
-        modulus_inv = $modulus_inv:literal
+        inv_strategy = $($inv_strategy:tt)*
     ) => {
         // The `value` field stores some value equivalent to `x` modulo `2^k - 1`: specifically, `0`
         // can be represented as either `0` or `2^k - 1`.
@@ -98,7 +98,7 @@ macro_rules! define_type {
                 self.inverse().is_some()
             }
 
-            crate::macros::define_exgcd_inverse!($ty, prime = false, strategy = inv $modulus_inv);
+            crate::macros::define_exgcd_inverse!(prime = false, strategy = $($inv_strategy)*);
         }
 
         impl Add for $ty {
@@ -209,22 +209,31 @@ macro_rules! define_type {
 
 define_type! {
     /// Arithmetic modulo `2^8 - 1 = 3 * 5 * 17`.
-    Fast8 as u8, i8, test in test8, carmichael = 16, modulus_inv = 16127
+    Fast8 as u8, i8, test in test8, carmichael = 16, inv_strategy = short with 4539345845589311231
 }
 
 define_type! {
     /// Arithmetic modulo `2^16 - 1 = 3 * 5 * 17 * 257`.
-    Fast16 as u16, i16, test in test16, carmichael = 256, modulus_inv = 1073676287
+    Fast16 as u16, i16,
+    test in test16,
+    carmichael = 256,
+    inv_strategy = short with 4611404539155644415
 }
 
 define_type! {
     /// Arithmetic modulo `2^32 - 1 = 3 * 5 * 17 * 257 * 65537`.
-    Fast32 as u32, i32, test in test32, carmichael = 65536, modulus_inv = 4611686014132420607
+    Fast32 as u32, i32,
+    test in test32,
+    carmichael = 65536,
+    inv_strategy = short with 4611686014132420607
 }
 
 define_type! {
     /// Arithmetic modulo `2^64 - 1 = 3 * 5 * 17 * 257 * 641 * 65537 * 6700417`.
-    Fast64 as u64, i64, test in test64, carmichael = 17153064960, modulus_inv = 85070591730234615847396907784232501247
+    Fast64 as u64, i64,
+    test in test64,
+    carmichael = 17153064960,
+    inv_strategy = long with 9223372036854775807
 }
 
 #[cfg(doctest)]
