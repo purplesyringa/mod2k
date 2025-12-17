@@ -271,22 +271,9 @@ macro_rules! define_exgcd_inverse {
     // `$modulus_inv = MODULUS^-1 mod 2^63`.
     (prime = $prime:literal, strategy = long with $modulus_inv:literal) => {
         fn inverse(self) -> Option<Self> {
-            use core::simd::{mask64x2, u64x2};
-
             if self.is_zero() {
                 return None;
             }
-
-            let mut x = self.value;
-            let mut y = Self::MODULUS;
-
-            let mut u: u64 = 1;
-            let mut v: u64 = 0;
-            let mut precision_left = 63;
-            // The values are implicitly multiplied by `2^(63 - precision_left)`, so that they can
-            // be stored as integers. They are signed, but stored in an unusual format that
-            // represents values `-2^63 + 1..=2^63` instead of the usual `-2^63..=2^63 - 1`; that
-            // is, the bit pattern `100..000` represents `2^63` and not `-2^63`.
 
             let fp_to_modular = |x: u64| -> Self {
                 // Get 1 out of the way quickly, since it makes handling of signed numbers difficult
@@ -318,64 +305,74 @@ macro_rules! define_exgcd_inverse {
                 })
             };
 
-            // At the start of each iteration, `x` is non-zero and `y` is odd.
+            let mut x = self.value;
+            let mut y = Self::MODULUS;
+
+            // The values are implicitly multiplied by `2^(63 - precision_left)`, so that they can
+            // be stored as integers. They are signed, but stored in an unusual format that
+            // represents values `-2^63 + 1..=2^63` instead of the usual `-2^63..=2^63 - 1`; that
+            // is, the bit pattern `100..000` represents `2^63` and not `-2^63`.
+
+            let mut is_first_iteration = true;
+            let mut u_acc = Self::ONE;
+            let mut v_acc = Self::ZERO;
             let mut q = x.trailing_zeros();
-            while x != 0 && q < precision_left {
-                precision_left -= q;
-                x >>= q;
-                v <<= q as u64;
 
-                // (x, y) -> (|y - x|, min(x, y))
-                let diff_yx = y.wrapping_sub(x);
-                q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
-                (x, y, u, v) = core::hint::select_unpredictable(
-                    x < y,
-                    (diff_yx, x, v, u),
-                    (diff_yx.wrapping_neg(), y, u, v),
-                );
-                u = u.wrapping_sub(v);
+            loop {
+                // The matrix transforming `(u, v)` to `(u', v')`:
+                // (u') = (f0 g0) (u)
+                // (v')   (f1 g1) (v)
+                let mut u: u64 = 1;
+                let mut v: u64 = if is_first_iteration { 0 } else { 1 << 32 };
+                let mut precision_left = if is_first_iteration { 63 } else { 31 };
+
+                // At the start of each iteration, `x` is non-zero and `y` is odd.
+                while x != 0 && q < precision_left {
+                    precision_left -= q;
+                    x >>= q;
+                    v <<= q;
+
+                    // (x, y) -> (|y - x|, min(x, y))
+                    let diff_yx = y.wrapping_sub(x);
+                    q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
+                    (x, y, u, v) = core::hint::select_unpredictable(
+                        x < y,
+                        (diff_yx, x, v, u),
+                        (diff_yx.wrapping_neg(), y, u, v),
+                    );
+                    u = u.wrapping_sub(v);
+                }
+
+                q -= precision_left;
+                x >>= precision_left;
+                v <<= precision_left;
+
+                let parse_coeffs = |coeffs: u64| -> [Self; 2] {
+                    [coeffs & ((1 << 32) - 1), (coeffs + (1 << 31) - 1) >> 32]
+                        .map(|x| fp_to_modular(x << 32))
+                };
+
+                if x == 0 {
+                    v_acc = if is_first_iteration {
+                        fp_to_modular(v)
+                    } else {
+                        let [f1, g1] = parse_coeffs(v);
+                        f1 * u_acc + g1 * v_acc
+                    };
+                    return ($prime || y == 1).then_some(v_acc);
+                }
+
+                if is_first_iteration {
+                    u_acc = fp_to_modular(u);
+                    v_acc = fp_to_modular(v);
+                } else {
+                    let [f0, g0] = parse_coeffs(u);
+                    let [f1, g1] = parse_coeffs(v);
+                    (u_acc, v_acc) = (f0 * u_acc + g0 * v_acc, f1 * u_acc + g1 * v_acc);
+                }
+
+                is_first_iteration = false;
             }
-
-            q -= precision_left;
-            x >>= precision_left;
-            v <<= precision_left as u64;
-
-            let u = fp_to_modular(u);
-            let v = fp_to_modular(v);
-            // The matrix transforming `(u, v)` to `(u', v')`:
-            // (u') = (f0 g0) (u)
-            // (v')   (f1 g1) (v)
-            let (mut u_coeffs, mut v_coeffs) = (u64x2::from([1, 0]), u64x2::from([0, 1]));
-            precision_left = 63;
-
-            // At the start of each iteration, `x` is non-zero and `y` is odd.
-            while x != 0 {
-                precision_left -= q;
-                x >>= q;
-                v_coeffs <<= q as u64;
-
-                // (x, y) -> (|y - x|, min(x, y))
-                let diff_yx = y.wrapping_sub(x);
-                q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
-                let mask = mask64x2::splat(x < y);
-                (u_coeffs, v_coeffs) = (
-                    mask.select(v_coeffs, u_coeffs),
-                    mask.select(u_coeffs, v_coeffs),
-                );
-                (x, y) = core::hint::select_unpredictable(
-                    x < y,
-                    (diff_yx, x),
-                    (diff_yx.wrapping_neg(), y),
-                );
-                u_coeffs -= v_coeffs;
-            }
-
-            let [f1, g1] = (v_coeffs << precision_left as u64)
-                .to_array()
-                .map(fp_to_modular);
-            let v = f1 * u + g1 * v;
-
-            ($prime || y == 1).then_some(v)
         }
     };
 }
