@@ -279,19 +279,14 @@ macro_rules! define_exgcd_inverse {
 
             let mut x = self.value;
             let mut y = Self::MODULUS;
-            let mut u = Self::ONE;
-            let mut v = Self::ZERO;
 
-            // The matrix transforming `(u, v)` to `(u', v')`:
-            // (u') = (f0 g0) (u)
-            // (v')   (f1 g1) (v)
-            // The coefficients are implicitly multiplied by `2^(63 - precision_left)`, so that they
-            // can be stored as integers. They are signed, but stored in an unusual format that
+            let mut u: u64 = 1;
+            let mut v: u64 = 0;
+            let mut precision_left = 63;
+            // The values are implicitly multiplied by `2^(63 - precision_left)`, so that they can
+            // be stored as integers. They are signed, but stored in an unusual format that
             // represents values `-2^63 + 1..=2^63` instead of the usual `-2^63..=2^63 - 1`; that
             // is, the bit pattern `100..000` represents `2^63` and not `-2^63`.
-            let identity = (u64x2::from([1, 0]), u64x2::from([0, 1]));
-            let (mut u_coeffs, mut v_coeffs) = identity;
-            let mut precision_left = 63;
 
             let fp_to_modular = |x: u64| -> Self {
                 // Get 1 out of the way quickly, since it makes handling of signed numbers difficult
@@ -323,36 +318,40 @@ macro_rules! define_exgcd_inverse {
                 })
             };
 
-            let mut flush =
-                |precision_left: &mut u32, u_coeffs: &mut u64x2, v_coeffs: &mut u64x2| {
-                    *u_coeffs <<= *precision_left as u64;
-                    *v_coeffs <<= *precision_left as u64;
-
-                    let ([f0, g0], [f1, g1]) = (u_coeffs.to_array(), v_coeffs.to_array());
-                    let [f0, g0, f1, g1] = [f0, g0, f1, g1].map(fp_to_modular);
-                    (u, v) = (f0 * u + g0 * v, f1 * u + g1 * v);
-
-                    *precision_left = 63;
-                    (*u_coeffs, *v_coeffs) = identity;
-                };
-
             // At the start of each iteration, `x` is non-zero and `y` is odd.
             let mut q = x.trailing_zeros();
-            while x != 0 {
-                x >>= q;
-                // At any point, `current x <= max(initial x, initial y)`, thus
-                //     q <= len(x) - 1 <= len(max(initial x, initial y)) - 1 <= k - 1 <= 63
-                // and we never get into a situation where the shift is too large to be performed
-                // with a single flush.
-                if core::hint::unlikely(q >= precision_left) {
-                    // Split into two steps.
-                    q -= precision_left;
-                    v_coeffs <<= precision_left as u64;
-                    precision_left = 0;
-                    flush(&mut precision_left, &mut u_coeffs, &mut v_coeffs);
-                    // `precision` is never allowed to get higher than 62. At this point, `q <= 62`.
-                }
+            while x != 0 && q < precision_left {
                 precision_left -= q;
+                x >>= q;
+                v <<= q as u64;
+
+                // (x, y) -> (|y - x|, min(x, y))
+                let diff_yx = y.wrapping_sub(x);
+                q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
+                (x, y, u, v) = core::hint::select_unpredictable(
+                    x < y,
+                    (diff_yx, x, v, u),
+                    (diff_yx.wrapping_neg(), y, u, v),
+                );
+                u = u.wrapping_sub(v);
+            }
+
+            q -= precision_left;
+            x >>= precision_left;
+            v <<= precision_left as u64;
+
+            let u = fp_to_modular(u);
+            let v = fp_to_modular(v);
+            // The matrix transforming `(u, v)` to `(u', v')`:
+            // (u') = (f0 g0) (u)
+            // (v')   (f1 g1) (v)
+            let (mut u_coeffs, mut v_coeffs) = (u64x2::from([1, 0]), u64x2::from([0, 1]));
+            precision_left = 63;
+
+            // At the start of each iteration, `x` is non-zero and `y` is odd.
+            while x != 0 {
+                precision_left -= q;
+                x >>= q;
                 v_coeffs <<= q as u64;
 
                 // (x, y) -> (|y - x|, min(x, y))
@@ -369,25 +368,13 @@ macro_rules! define_exgcd_inverse {
                     (diff_yx.wrapping_neg(), y),
                 );
                 u_coeffs -= v_coeffs;
-
-                // At this point in the loop,
-                //     -2^(precision+1) < f0, g0 < 2^(precision+1)
-                //     -2^precision < f1, g1 <= 2^precision
-                // This clearly holds on the first iteration and after each flush. On the successive
-                // iterations, we'll first shift `v_coeffs` by some `q > 0`, resulting in
-                //     -2^(precision+1) < f0, g0 < 2^(precision+1)
-                //     -2^precision' < f1, g1 <= 2^precision'
-                // and then perform a conditional swap and subtraction, resulting in
-                //     -2^(precision'+1) < f0, g0 < 2^(precision'+1)
-                //     -2^precision' < f1, g1 <= 2^precision'
-                // ...once we reach this point again.
-                //
-                // Thus `precision+2`-bit numbers suffice. The maximum value of `precision` at the
-                // relevant places is 62, since we flush as soon as `precision` reaches 63. 64-bit
-                // numbers is exactly what we have.
             }
 
-            flush(&mut precision_left, &mut u_coeffs, &mut v_coeffs);
+            let [f1, g1] = (v_coeffs << precision_left as u64)
+                .to_array()
+                .map(fp_to_modular);
+            let v = f1 * u + g1 * v;
+
             ($prime || y == 1).then_some(v)
         }
     };
