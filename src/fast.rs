@@ -240,7 +240,7 @@ define_type! {
     test in test64,
     carmichael = 17153064960,
     factorization = [3, 5, 17, 257, 641, 65537, 6700417],
-    inv_strategy = long with 9223372036854775807
+    inv_strategy = builtin
 }
 
 #[cfg(doctest)]
