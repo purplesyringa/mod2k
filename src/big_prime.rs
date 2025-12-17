@@ -17,7 +17,8 @@ macro_rules! define_type {
         test in $test_mod:ident,
         d = $d:literal,
         d_order = $d_order:literal,
-        d_inv = $d_inv:literal
+        d_inv = $d_inv:literal,
+        modulus_inv = $modulus_inv:literal
     ) => {
         // The `value` field stores some value equivalent to `x` modulo `2^k - d`.
         crate::macros::define_type_basics! {
@@ -139,9 +140,12 @@ macro_rules! define_type {
             }
 
             crate::macros::define_exgcd_inverse!(
+                $ty,
                 prime = true,
                 limited_value = false,
-                fast_shr = false
+                fast_arithmetic = false,
+                // `(2^k - d)^-1 (mod 2^(2k - 2))`, used by inversion logic.
+                modulus_inv = $modulus_inv
             );
         }
 
@@ -306,17 +310,27 @@ macro_rules! define_type {
 
 define_type! {
     /// Arithmetic modulo `2^8 - 5 = 251`.
-    BigPrime8 as u8, i8, test in test7, d = 5, d_order = 25, d_inv = 201
+    BigPrime8 as u8, i8, test in test7, d = 5, d_order = 25, d_inv = 201, modulus_inv = 2611
 }
 
 define_type! {
     /// Arithmetic modulo `2^16 - 15 = 65521`.
-    BigPrime16 as u16, i16, test in test13, d = 15, d_order = 585, d_inv = 61153
+    BigPrime16 as u16, i16,
+    test in test13,
+    d = 15,
+    d_order = 585,
+    d_inv = 61153,
+    modulus_inv = 233836817
 }
 
 define_type! {
     /// Arithmetic modulo `2^32 - 5 = 4294967291`.
-    BigPrime32 as u32, i32, test in test31, d = 5, d_order = 2147483645, d_inv = 3435973833
+    BigPrime32 as u32, i32,
+    test in test31,
+    d = 5,
+    d_order = 2147483645,
+    d_inv = 3435973833,
+    modulus_inv = 3504881373833016115
 }
 
 define_type! {
@@ -325,7 +339,8 @@ define_type! {
     test in test61,
     d = 59,
     d_order = 4611686018427387889,
-    d_inv = 14694863923124558020
+    d_inv = 14694863923124558020,
+    modulus_inv = 58848027832922997703226965506995332877
 }
 
 #[cfg(doctest)]

@@ -165,9 +165,10 @@ macro_rules! define_type {
             }
 
             crate::macros::define_exgcd_inverse!(
+                $ty,
                 prime = true,
                 limited_value = true,
-                fast_shr = true
+                fast_arithmetic = true
             );
         }
 

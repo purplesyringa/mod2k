@@ -128,96 +128,178 @@ pub(crate) use forward_shift_op;
 
 macro_rules! define_exgcd_inverse {
     (
+        $ty:tt,
         prime = $prime:literal,
         limited_value = $limited_value:literal,
-        fast_shr = $fast_shr:literal
+        fast_arithmetic = $fast_arithmetic:literal
+        $(, modulus_inv = $modulus_inv:literal)?
     ) => {
         fn inverse(self) -> Option<Self> {
             // `$limited_value` indicates `value <= MODULUS`.
-            let mut x = if $limited_value {
-                self.value
+
+            // Obtain `x <= MODULUS` and handle zero remaindeer in one step.
+            let mut x;
+            if $limited_value {
+                x = self.value;
+                if self.is_zero() {
+                    return None;
+                }
             } else {
-                self.remainder()
-            };
+                x = self.remainder();
+                if x == 0 {
+                    return None;
+                }
+            }
+
             let mut y = Self::MODULUS;
 
-            let is_zero = if $limited_value {
-                self.is_zero()
-            } else {
-                x == 0
-            };
-            if is_zero {
+            // This implements Stein's GCD algorithm using the general structure from:
+            // - https://en.algorithmica.org/hpc/algorithms/gcd/
+            // - https://lemire.me/blog/2024/04/13/greatest-common-divisor-the-extended-euclidean-algorithm-and-speed/
+            // ...and extends it a la https://eprint.iacr.org/2020/972.pd (Optimized Binary GCD for
+            // Modular Inversion, Thomas Pornin).
+            //
+            // In a nutshell, we perform some linear operations on `x` and `y`, so there exist some
+            // `a, b` such that `y' = ax + by`. At the end of the algorithm, `y' = 1`, so we infer
+            // `ax = 1 (mod y)`, i.e. `a = x^-1 (mod y)`. By applying the same operations to
+            // `(u, v) = (1, 0)` in parallel, we obtain `u' = au + bv = a`, i.e. the right inverse.
+            //
+            // The linear operations we perform are subtraction and division by powers of two. For
+            // `x`, the divisions are exact, but they're not guaranteed to be such for `u`, so we
+            // have to use a trick:
+            // - If modular arithmetic is cheap, we can work with `u, v` modulo `m`, since we only
+            //   need `u mod m`. This utilizes right shifts provided by the modular type.
+            // - If it's expensive, we can work in fixed point and convert to modular at the end.
+            //   We prove that a signed numeric type twice as long as the input is sufficient below.
+
+            #[cfg(not($fast_arithmetic))]
+            mod double_width {
+                pub trait DoubleWidth {
+                    type Ty;
+                    type Signed;
+                }
+                impl DoubleWidth for u8 {
+                    type Ty = u16;
+                    type Signed = i16;
+                }
+                impl DoubleWidth for u16 {
+                    type Ty = u32;
+                    type Signed = i32;
+                }
+                impl DoubleWidth for u32 {
+                    type Ty = u64;
+                    type Signed = i64;
+                }
+                impl DoubleWidth for u64 {
+                    type Ty = u128;
+                    type Signed = i128;
+                }
+            }
+            #[cfg(not($fast_arithmetic))]
+            type Double = <<$ty as Mod>::Native as double_width::DoubleWidth>::Ty;
+            #[cfg(not($fast_arithmetic))]
+            type DoubleSigned = <<$ty as Mod>::Native as double_width::DoubleWidth>::Signed;
+
+            let mut u;
+            let mut v;
+            #[cfg($fast_arithmetic)]
+            {
+                u = Self::ONE;
+                v = Self::ZERO;
+            }
+            #[cfg(not($fast_arithmetic))]
+            {
+                // The two highest bits form the whole part, the rest form the fractional part. The
+                // value is signed.
+                u = (1 as DoubleSigned) << (Double::BITS - 2);
+                v = 0 as DoubleSigned;
+            }
+
+            // At the start of each iteration, `x` is non-zero and `y` is odd.
+            let mut q = x.trailing_zeros();
+            while x != 0 {
+                // Teach the optimizer that `q` is small.
+                // SAFETY: Initially, `max(x, y) <= MODULUS`. Each iteration can only reduce the
+                // maximum. Thus, `2^q <= x <= MODULUS`.
+                unsafe {
+                    core::hint::assert_unchecked(q <= Self::MODULUS.ilog2());
+                }
+                x >>= q;
+                // Suboptimal codegen due to https://github.com/llvm/llvm-project/issues/172097.
+                u >>= q;
+                // Consider the total amount of shifts `total_q`. Each loop iteration reduces
+                // `len(x) + len(y)` by at least `q` bits, and by the time the last shift is
+                // performed, `x, y != 0`, so
+                //     total_q <= len(x) + len(y) - 2 <= 2k - 2 <= Double::BITS - 2
+                // Thus `Double::BITS - 2` fractional bits are sufficient to represent `u`, `v`.
+
+                // (x, y) -> (|y - x|, min(x, y))
+                let diff_yx = y.wrapping_sub(x);
+                q = diff_yx.trailing_zeros(); // `|y - x|` has the same ctz as `y - x`
+                (x, y, u, v) = core::hint::select_unpredictable(
+                    x < y,
+                    (diff_yx, x, v, u),
+                    (diff_yx.wrapping_neg(), y, u, v),
+                );
+                u -= v;
+
+                // We'll show that at this point in the loop,
+                //     -2 < u < 2
+                //     -1 < v <= 1
+                // This is clearly true the first time we enter the loop. On the following
+                // iterations, we'll first shift `u` by some `q > 0`, resulting in
+                //     -1 < u <= 1
+                //     -1 < v <= 1
+                // and then perform a conditional swap and subtraction, resulting in
+                //     -2 < u < 2
+                //     -1 < v <= 1
+                // ...once we reach this point again. The fact that `u` never reaches `2` exactly
+                // proves that the whole part never overflows into the sign bit.
+            }
+
+            #[cfg(not($prime))]
+            if y != 1 {
                 return None;
             }
 
-            // Binary extended Euclidean algorithm a la https://eprint.iacr.org/2020/972.pdf
-            // (Optimized Binary GCD for Modular Inversion, Thomas Pornin).
-            //
-            // At each step, `a_i x_i + b_i y_i = d`, where `d = (x, y)`.
-            //
-            // The values `a_1, b_1` are initially unknown. We only know that at the end,
-            // `a_n = 0, b_n = 1`. As `x_i, y_i` are updated over the course of the algorithm,  we
-            // learn how `a_i, b_i` depends on `a_{i+1}, b_{i+1}`. The dependency is linear:
-            //
-            //     (a_i \\ b_i) = A_i * (a_{i+1} \\ b_{i+1})
-            //     (a_1 \\ b_1) = A_1 * A_2 * ... * A_{n-1} * (0 \\ 1)
-            //
-            // Since we are only interested in `a`, we can compute
-            //
-            //     a_1 = (1 0) * A_1 * A_2 * ... * A_{n-1} * (0 \\ 1)
-            //
-            // and iteratively multiply the covector `(s t) = (1 0)` by matrices `A_i`.
-            //
-            // For binary Euclidean algorithm, `A_i` can contain division by powers of two, so both
-            // `A_i` and `(s t)` are computed modulo `m`, since we're only interested in `a mod m`
-            // anyway and dividing by two `mod m` is usually cheap.
-            //
-            // The structure of binary GCD is taken from:
-            // - https://en.algorithmica.org/hpc/algorithms/gcd/
-            // - https://lemire.me/blog/2024/04/13/greatest-common-divisor-the-extended-euclidean-algorithm-and-speed/
+            #[cfg($fast_arithmetic)]
+            return Some(v);
 
-            let mut s = Self::ONE;
-            let mut t = Self::ZERO;
-            let mut total_k = 0;
+            #[cfg(not($fast_arithmetic))]
+            Some({
+                // Compute `(v / 2^(Double::BITS - 2)) mod MODULUS` with REDC.
 
-            // At the start of each iteration, `x` is non-zero and `y` is odd.
-            let mut k = x.trailing_zeros();
-            while x != 0 {
-                // Teach the optimizer that `k` is small.
-                // SAFETY: Initially, `max(x, y) <= MODULUS`. Each iteration can only reduce the
-                // maximum. Thus, `2^k <= x <= MODULUS`.
-                unsafe {
-                    core::hint::assert_unchecked(k <= Self::MODULUS.ilog2());
+                // `- 0` is an ugly hack to ensure correct parsing regardless of the presence of
+                // `$modulus_inv`, since the expansion happens before `cfg` is applied.
+                const MODULUS_INV: Double = $($modulus_inv)? - 0;
+                const {
+                    assert!(MODULUS_INV != 0);
                 }
-                x >>= k;
-                if $fast_shr {
-                    s >>= k;
+
+                // Take
+                //     v' = v - ((v * MODULUS^-1) mod 2^(Double::BITS - 2)) * MODULUS
+                // Then `v' = v (mod MODULUS)` and `v' = 0 (mod 2^(Double::BITS - 2))`, so
+                //     v / 2^(Double::BITS - 2) = (v' >> (Double::BITS - 2)) (mod MODULUS)
+                // Since the bottom `Double::BITS - 2` bits of `v` and the subtrahend are equal, and
+                // the bits above that position in `v` are zero (unless the input is `1`, which we
+                // have to handle separately), that's equal to
+                //     -(((v * MODULUS^-1) mod 2^(Double::BITS - 2)) * MODULUS) >> (Double::BITS - 2)
+                // which can be computed more efficiently as
+                //     -(((v * (MODULUS^-1 << 2)) mod 2^Double::BITS) * MODULUS) >> Double::BITS
+                // This is a value between `1` and `-(MODULUS - 1)`, since we know `0` cannot be
+                // an inverse, so this can be straightforwardly translated to a remainder.
+                let factor = v.unsigned_abs().wrapping_mul(MODULUS_INV << 2);
+                let neg_rem = factor.carrying_mul(Self::MODULUS as Double, 0).1 as Self::Native;
+                Self::new(if factor == 0 {
+                    // Only occurs for `v = 2^(Double::BITS - 2)`. Sadly this has to be handled
+                    // explicitly.
+                    1
+                } else if v >= 0 {
+                    Self::MODULUS - neg_rem
                 } else {
-                    // Will shift right once at the end. Has suboptimal codegen due to [1].
-                    // [1]: https://github.com/llvm/llvm-project/issues/172097
-                    total_k += k;
-                    t <<= k;
-                }
-
-                // (x, y) -> (|x - y|, min(x, y))
-                let diff_xy = x.wrapping_sub(y);
-                k = diff_xy.trailing_zeros(); // `|x - y|` has the same ctz as `x - y`
-                (x, y, s, t) = core::hint::select_unpredictable(
-                    x < y,
-                    (diff_xy.wrapping_neg(), x, t, s),
-                    (diff_xy, y, s, t),
-                );
-                s -= t;
-            }
-
-            if !$fast_shr {
-                t >>= total_k;
-            }
-
-            // We have previously asserted `!is_zero`, and all non-zero values are invertible modulo
-            // prime.
-            let is_invertible = $prime || y == 1;
-            is_invertible.then_some(t)
+                    neg_rem
+                })
+            })
         }
     };
 }
