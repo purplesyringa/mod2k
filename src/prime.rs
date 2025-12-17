@@ -164,12 +164,7 @@ macro_rules! define_type {
                 self.value != 0
             }
 
-            crate::macros::define_exgcd_inverse!(
-                $ty,
-                prime = true,
-                limited_value = true,
-                fast_arithmetic = true
-            );
+            crate::macros::define_exgcd_inverse!($ty, prime = true, strategy = builtin);
         }
 
         impl Add for $ty {

@@ -98,13 +98,7 @@ macro_rules! define_type {
                 self.inverse().is_some()
             }
 
-            crate::macros::define_exgcd_inverse!(
-                $ty,
-                prime = false,
-                limited_value = true,
-                fast_arithmetic = false,
-                modulus_inv = $modulus_inv
-            );
+            crate::macros::define_exgcd_inverse!($ty, prime = false, strategy = inv $modulus_inv);
         }
 
         impl Add for $ty {

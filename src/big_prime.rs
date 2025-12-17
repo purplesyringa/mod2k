@@ -139,14 +139,7 @@ macro_rules! define_type {
                 !self.is_zero()
             }
 
-            crate::macros::define_exgcd_inverse!(
-                $ty,
-                prime = true,
-                limited_value = false,
-                fast_arithmetic = false,
-                // `(2^k - d)^-1 (mod 2^(2k - 2))`, used by inversion logic.
-                modulus_inv = $modulus_inv
-            );
+            crate::macros::define_exgcd_inverse!($ty, prime = true, strategy = inv $modulus_inv);
         }
 
         impl Add for $ty {
