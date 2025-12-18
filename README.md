@@ -1,6 +1,6 @@
 # `mod2k`
 
-![License](https://img.shields.io/crates/l/mod2k) [![Version](https://img.shields.io/crates/v/mod2k)](https://crates.io/crates/lithium) [![docs.rs](https://img.shields.io/docsrs/mod2k)](https://docs.rs/mod2k) ![Tests](https://github.com/purplesyringa/mod2k/actions/workflows/ci.yml/badge.svg)
+![License](https://img.shields.io/crates/l/mod2k) [![Version](https://img.shields.io/crates/v/mod2k)](https://crates.io/crates/mod2k) [![docs.rs](https://img.shields.io/docsrs/mod2k)](https://docs.rs/mod2k) ![Tests](https://github.com/purplesyringa/mod2k/actions/workflows/ci.yml/badge.svg)
 
 A `#![no_std]` Rust crate for fast arithmetic modulo `2^k`, `2^k - 1`, and `2^k - d`.
 
