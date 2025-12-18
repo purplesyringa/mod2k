@@ -132,9 +132,15 @@ impl<T: BlackBox> BlackBox for Option<T> {
 }
 
 fn serialize() {
+    #[cfg(target_arch = "x86")]
+    unsafe {
+        core::arch::x86::_mm_lfence();
+    }
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         core::arch::x86_64::_mm_lfence();
     }
+    // TODO: handle other architectures
 }
 
 #[inline(never)] // reduce register pressure/make codegen more consistent
