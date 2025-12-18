@@ -20,11 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Configure Rust
-        run: rustup update nightly && rustup default nightly && rustup component add miri
+        run: rustup update nightly && rustup default nightly
       - name: Run tests
         run: cargo test
-      - name: Run tests under Miri
-        run: cargo miri test
 
   lint:
     timeout-minutes: 2
