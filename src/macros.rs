@@ -263,27 +263,26 @@ pub(crate) use define_type_basics;
 #[cfg(test)]
 macro_rules! test_ty {
     ($ty:ident as $native:ident, $signed:ident, shr = $shr:tt) => {
+        fn raw_numbers() -> impl Iterator<Item = $native> {
+            let edge_cases = (-5i32..=5).map(|x| x as $native);
+
+            let mut rng = fastrand::Rng::new();
+            let random_data = (0..50).map(move |_| rng.u64(..) as $native);
+
+            edge_cases.chain(random_data)
+        }
+
         fn numbers() -> impl Iterator<Item = $ty> {
-            // Range limited so that the product of two numbers fits in $signed for testing.
-            (-11..=11).map(|x| $ty::new(x as $native))
+            raw_numbers().map($ty::new)
         }
 
-        fn to_signed(x: $ty) -> $signed {
-            let x = x.to_raw();
-            if x <= $ty::MODULUS.wrapping_sub(1) / 2 {
-                x as $signed
+        fn assert_remainder(x: $ty, expected: u128) {
+            let modulus = if $ty::MODULUS == 0 {
+                $native::MAX as u128 + 1
             } else {
-                x.wrapping_sub($ty::MODULUS) as $signed
-            }
-        }
-
-        fn from_signed(x: $signed) -> $ty {
-            if $ty::MODULUS == 0 {
-                // Full power-of-two modulus
-                $ty::new(x as $native)
-            } else {
-                $ty::new((x as i128).rem_euclid($ty::MODULUS as i128) as $native)
-            }
+                $ty::MODULUS as u128
+            };
+            assert_eq!(x.remainder(), (expected % modulus) as $native);
         }
 
         #[test]
@@ -300,68 +299,63 @@ macro_rules! test_ty {
 
         #[test]
         fn remainder() {
-            for x in -10..10 {
-                let mut x = x as $native;
-                if $ty::MODULUS != 0 {
-                    x %= $ty::MODULUS;
-                }
-                assert_eq!($ty::new(x).remainder(), x);
+            for x in raw_numbers() {
+                let expected = if $ty::MODULUS == 0 {
+                    x
+                } else {
+                    x % $ty::MODULUS
+                };
+                assert_eq!($ty::new(x).remainder(), expected);
             }
         }
 
         #[test]
         fn arithmetic() {
             for x in numbers() {
+                assert_remainder(-x, $ty::MODULUS.wrapping_sub(x.remainder()) as u128);
+                assert_remainder(-&x, $ty::MODULUS.wrapping_sub(x.remainder()) as u128);
+            }
+
+            for x in numbers() {
                 for y in numbers() {
                     macro_rules! test_op {
-                        ($op:tt, $op_assign:tt) => {
-                            let expected = from_signed(to_signed(x) $op to_signed(y));
-                            assert_eq!(x $op y, expected);
-                            assert_eq!(&x $op y, expected);
-                            assert_eq!(x $op &y, expected);
-                            assert_eq!(&x $op &y, expected);
+                        ($op:tt, $op_assign:tt, $expected:expr) => {{
+                            let expected = $expected;
+                            assert_remainder(x $op y, expected);
+                            assert_remainder(&x $op y, expected);
+                            assert_remainder(x $op &y, expected);
+                            assert_remainder(&x $op &y, expected);
                             let mut x1 = x;
                             x1 $op_assign y;
-                            assert_eq!(x1, expected);
+                            assert_remainder(x1, expected);
                             x1 = x;
                             x1 $op_assign &y;
-                            assert_eq!(x1, expected);
-                        };
+                            assert_remainder(x1, expected);
+                        }};
                     }
-
-                    test_op!(+, +=);
-                    test_op!(-, -=);
-                    test_op!(*, *=);
+                    test_op!(+, +=, x.remainder() as u128 + y.remainder() as u128);
+                    test_op!(-, -=, x.remainder() as u128 + (-y).remainder() as u128);
+                    test_op!(*, *=, x.remainder() as u128 * y.remainder() as u128);
                 }
-
-                assert_eq!(-x, from_signed(-to_signed(x)));
-                assert_eq!(-&x, from_signed(-to_signed(x)));
             }
         }
 
         #[test]
         fn shifts() {
             for x in numbers() {
-                for shift in 0..10.min($signed::BITS) {
-                    let sx = to_signed(x);
-                    if (sx << shift) >> shift != sx {
-                        continue;
-                    }
-                    let expected = from_signed(sx << shift);
+                for shift in 0..=64 {
+                    let expected = (x.remainder() as u128) << shift;
 
                     macro_rules! assert_for_shift_ty {
                         ($shift_ty:ty) => {
-                            assert_eq!(x << shift as $shift_ty, expected);
+                            assert_remainder(x << shift as $shift_ty, expected);
                             #[cfg($shr)]
-                            assert_eq!(expected >> shift as $shift_ty, x);
+                            assert_eq!((x << shift as $shift_ty) >> shift as $shift_ty, x);
                         };
                         (signed $shift_ty:ty) => {
                             assert_for_shift_ty!($shift_ty);
                             #[cfg($shr)]
-                            {
-                                assert_eq!(x >> -(shift as $shift_ty), expected);
-                                assert_eq!(expected << -(shift as $shift_ty), x);
-                            }
+                            assert_remainder(x >> -(shift as $shift_ty), expected);
                         };
                     }
 
@@ -399,16 +393,17 @@ macro_rules! test_ty {
         fn equality() {
             for x in numbers() {
                 for y in numbers() {
-                    assert_eq!(x == y, to_signed(x) == to_signed(y));
+                    assert_eq!(x == y, x.remainder() == y.remainder());
                 }
             }
 
             for x in numbers() {
-                let sx = to_signed(x);
-                assert_eq!(x.is_zero(), sx == 0);
-                assert_eq!(x.is::<0>(), sx == 0);
-                assert_eq!(x.is::<{ $ty::MODULUS.wrapping_sub(1) as u64 }>(), sx == -1);
-                assert_eq!(x.is::<5>(), sx == 5);
+                const MAX: $native = $ty::MODULUS.wrapping_sub(1);
+                let r = x.remainder();
+                assert_eq!(x.is_zero(), r == 0);
+                assert_eq!(x.is::<0>(), r == 0);
+                assert_eq!(x.is::<{ MAX as u64 }>(), r == MAX as $native);
+                assert_eq!(x.is::<5>(), r == 5);
             }
 
             fn _impls_eq(x: $ty) -> impl Eq {
@@ -487,16 +482,19 @@ macro_rules! test_ty {
                     assert_eq!(x * y, $ty::ONE);
                 } else {
                     assert!(!x.is_invertible());
-                    assert!(has_common_divisor(x.to_raw(), if $ty::MODULUS == 0 { 2 } else { $ty::MODULUS }));
+                    assert!(has_common_divisor(
+                        x.to_raw(),
+                        if $ty::MODULUS == 0 { 2 } else { $ty::MODULUS }
+                    ));
                 }
             }
         }
 
         #[test]
         fn division() {
-            for x in numbers() {
-                for y in numbers() {
-                    if y.is_invertible() {
+            for y in numbers() {
+                if y.is_invertible() {
+                    for x in numbers() {
                         assert_eq!(x / y * y, x);
                     }
                 }
@@ -522,7 +520,10 @@ macro_rules! test_ty {
                 let mut expected = $ty::ONE;
                 for n in 0..10 {
                     assert_eq!(x.pow(n), expected);
-                    assert_eq!(x.pow($ty::CARMICHAEL + n), x.pow_internal($ty::CARMICHAEL + n, $ty::ONE));
+                    assert_eq!(
+                        x.pow($ty::CARMICHAEL + n),
+                        x.pow_internal($ty::CARMICHAEL + n, $ty::ONE),
+                    );
                     expected *= x;
                 }
             }
