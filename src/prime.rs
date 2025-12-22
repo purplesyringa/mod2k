@@ -16,6 +16,7 @@ macro_rules! define_type {
         $ty:ident as $native:ident, $signed:ident,
         test in $test_mod:ident,
         k = $k:literal,
+        long = $long:literal,
         modulus_inv = $modulus_inv:literal,
         inv_strategy = {$($inv_strategy:tt)*}
     ) => {
@@ -54,7 +55,7 @@ macro_rules! define_type {
                 // Effectively a rotation of `self.value` as a `k`-bit number by `n`.
                 let x = if cfg!(not(target_arch = "aarch64")) || $native::BITS < 64 {
                     // Place two copies of the input side by side, shift and take `k` bits at
-                    // a fixed position. Requires a single possibly variable shift. For `Mod61`,
+                    // a fixed position. Requires a single possibly variable shift. For `Prime61`,
                     // x86-64 is great due to `shld`/`shrd`, but ARM is bad.
                     let offset = $native::BITS - $k;
 
@@ -66,8 +67,16 @@ macro_rules! define_type {
                     //     self.value.funnel_shr(self.value << offset, n) >> offset
                     // }
 
-                    let double =
-                        u128::from(self.value) << offset | u128::from(self.value) << $native::BITS;
+                    // This has suboptimal codegen due to [2] if 128-bit numbers are used, so the
+                    // 64-bit case is special-cased to avoid slowdown on smaller moduli.
+                    // [2]: https://github.com/llvm/llvm-project/issues/172097
+                    #[cfg($long)]
+                    type Double = u128;
+                    #[cfg(not($long))]
+                    type Double = u64;
+
+                    let double = Double::from(self.value << offset)
+                        | (Double::from(self.value) << $native::BITS);
                     if left {
                         ((double << n) >> $native::BITS) as $native & Self::MODULUS
                     } else {
@@ -322,6 +331,7 @@ define_type! {
     Prime7 as u8, i8,
     test in test7,
     k = 7,
+    long = false,
     modulus_inv = 9150747060186627967,
     inv_strategy = {long = false}
 }
@@ -331,6 +341,7 @@ define_type! {
     Prime13 as u16, i16,
     test in test13,
     k = 13,
+    long = false,
     modulus_inv = 18442239924259250175,
     inv_strategy = {long = false}
 }
@@ -340,6 +351,7 @@ define_type! {
     Prime31 as u32, i32,
     test in test31,
     k = 31,
+    long = false,
     modulus_inv = 13835058053134680063,
     inv_strategy = {long = false}
 }
@@ -349,6 +361,7 @@ define_type! {
     Prime61 as u64, i64,
     test in test61,
     k = 61,
+    long = true,
     modulus_inv = 16140901064495857663,
     inv_strategy = {long = true}
 }
