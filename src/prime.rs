@@ -58,7 +58,7 @@ macro_rules! define_type {
                     // x86-64 is great due to `shld`/`shrd`, but ARM is bad.
                     let offset = $native::BITS - $k;
 
-                    // Simpler and faster, but nightly-only. [1]
+                    // More idiomatic and sometimes more optimizable, but nightly-only. [1]
                     // [1]: https://github.com/rust-lang/rust/issues/145686
                     // if left {
                     //     self.value.funnel_shl(self.value << offset, n) & Self::MODULUS
@@ -80,7 +80,7 @@ macro_rules! define_type {
                     if left {
                         ((self.value << n) & Self::MODULUS) | (self.value >> ($k - n))
                     } else {
-                        (self.value >> n) | (self.value & ((1 << n) - 1)) << ($k - n)
+                        (self.value >> n) | (self.value << ($k - n)) & Self::MODULUS
                     }
                 };
                 // We'd prefer to use the first method for variable amounts and the second method
