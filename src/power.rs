@@ -88,7 +88,7 @@ macro_rules! define_type {
                 if self.value & 1 == 0 {
                     return None;
                 }
-                // This seeds the algorihtm with 5 bits of precision, according to [1].
+                // This seeds the algorithm with 5 bits of precision, according to [1].
                 // [1]: https://arxiv.org/pdf/1303.0328
                 let mut x = Self::new(self.value.wrapping_mul(3) ^ 2);
                 let mut y = Self::ONE - self * x;
