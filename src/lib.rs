@@ -59,6 +59,17 @@
 //! - [`Display`](core::fmt::Display) and related traits print the remainder.
 //!
 //!
+//! ## Example
+//!
+//! ```rust
+//! use mod2k::{Mod, Prime31}; // arithmetic modulo 2^31 - 1 = 2147483647
+//!
+//! assert_eq!(Prime31::new(5) + Prime31::new(7), Prime31::new(12));
+//! assert_eq!((-Prime31::ONE) * (-Prime31::ONE), Prime31::ONE);
+//! assert_eq!((-Prime31::ONE).remainder(), Prime31::MODULUS - 1);
+//! ```
+//!
+//!
 //! ## Bare metal support
 //!
 //! This is a `#![no_std]` crate.
