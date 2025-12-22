@@ -1,3 +1,17 @@
+This benchmark compares types in the `mod2k` crate to each other.
+
+---
+
+It does *not* compare `mod2k` to other crates, because this is impossible to do diligently. The closest crate would be [num-modular](https://docs.rs/num-modular/), but it'd be an incredibly apples-to-oranges comparison:
+
+- `num-modular` does not implement some feature of `mod2k`, like shifts.
+- `num-modular` does not implement some worst-case protection, like in `pow`. Showing just the worst case would be dishonest because few people will trigger it, but it's not clear what the average case is.
+- `num-modular` emits *a lot* of branching code. Even `-` branches. At the scale in question, it's impossible to generate random data to demonstrate branch misprediction fast enough to avoid skewing the results.
+
+Basically the only usable piece of information I could extract is that `num-modular` spends 0.50 ns on adding numbers. That's worse than `mod2k` in all configurations, and about 2x worse than the `prime` configuration. It is also slow at `new`/`convert`, using the `div` instruction even with a fixed modulus for whatever reason, and at inverse calculation, spending 4x more time than `mod2k`. Based on [rigid scientific extrapolation](https://xkcd.com/605/), I'd expect `mod2k` to be at least 2x faster than `num-modular` on average, and at least 1.5x faster than a moderately optimized textbook implementation, but this may vary wildly in practice.
+
+---
+
 This data is a rough approximation of multiple independent microbenchmarks. As always, prefer to measure performance of practical code: microbenchmarks don't paint the full picture, due to optimizer deficiencies if nothing else.
 
 For cells with `/`, the first number measures throughput-bound code, and the second number measures latency-bound code. For cells without `/`, the sole measurement is throughput-bound. 64-bit moduli are sometimes consistently slower than smaller types, so they are shown separately when relevant.
