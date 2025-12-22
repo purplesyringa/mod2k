@@ -1,5 +1,6 @@
 use core::time::Duration;
 use mod2k::*;
+use num_modular::{Reducer, Vanilla};
 use std::collections::HashMap;
 
 macro_rules! for_each_modulus {
@@ -216,17 +217,21 @@ fn main() {
         };
     }
 
+    println!("Benchmarking... this should take about a minute, please wait for the completion");
+
+    let mut add = |ty_name: &'static str, bench_name: &'static str, measurement: Measurement| {
+        if !results.contains_key(bench_name) {
+            bench_order.push(bench_name);
+        }
+        results
+            .entry(bench_name)
+            .or_default()
+            .insert(ty_name, measurement);
+    };
+
     macro_rules! bench_modulus {
         ($ty:tt, shr = $shr:tt, worst_shift = $worst_shift:tt) => {{
-            let mut add = |bench_name: &'static str, measurement: Measurement| {
-                if !results.contains_key(bench_name) {
-                    bench_order.push(bench_name);
-                }
-                results
-                    .entry(bench_name)
-                    .or_default()
-                    .insert(stringify!($ty), measurement);
-            };
+            let mut add = |bench_name, measurement| add(stringify!($ty), bench_name, measurement);
 
             // Branchless functions that take and return distinct types -- can reasonably only
             // measure throughput, since converting types would affect latency.
@@ -315,16 +320,36 @@ fn main() {
             );
         }};
     }
-    println!("Benchmarking... this should take about a minute, please wait for the completion");
-    for_each_modulus!(bench_modulus);
+    // for_each_modulus!(bench_modulus);
+
+    macro_rules! bench_num_modular {
+        ($ty_name:literal, $modulus:expr) => {{
+            let mut add = |bench_name, measurement| add($ty_name, bench_name, measurement);
+            let reducer = Vanilla::new(&$modulus);
+            add("new", bencht(|x| reducer.transform(x)));
+            add("add", benchtl(|x| reducer.add(&x, &x.black_box())));
+            add("sub", benchtl(|x| reducer.sub(&x, &x.black_box())));
+            add("mul", benchtl(|x| reducer.mul(&x, &x.black_box())));
+            add("negate", benchtl(|x| reducer.neg(x)));
+            let mut rng = fastrand::Rng::new();
+            add(
+                "inverse random",
+                bencht(|()| reducer.inv(reducer.transform(rng.u64(..) as _))),
+            );
+        }};
+    }
+    bench_num_modular!("Vanilla8", (1u8 << 7) - 1);
+    bench_num_modular!("Vanilla16", (1u16 << 13) - 1);
+    bench_num_modular!("Vanilla32", (1u32 << 31) - 1);
+    bench_num_modular!("Vanilla64", (1u64 << 61) - 1);
 
     for bench_name in bench_order {
         println!("{bench_name}:");
         let bench_results = &results[bench_name];
         macro_rules! print_modulus {
-            ($ty:tt $($rest:tt)*) => {
-                print!("\t{}: ", stringify!($ty));
-                match bench_results.get(stringify!($ty)) {
+            ($ty_name:tt $($rest:tt)*) => {
+                print!("\t{}: ", stringify!($ty_name));
+                match bench_results.get(stringify!($ty_name)) {
                     Some(measurement) => {
                         match measurement.throughput_bound {
                             Some(n) => print!("{n:.2}ns"),
@@ -342,5 +367,9 @@ fn main() {
             };
         }
         for_each_modulus!(print_modulus);
+        print_modulus!(Vanilla8);
+        print_modulus!(Vanilla16);
+        print_modulus!(Vanilla32);
+        print_modulus!(Vanilla64);
     }
 }
